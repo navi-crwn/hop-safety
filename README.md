@@ -1,29 +1,25 @@
 # hop/safety
 
-Content and URL safety verification, threat feeds, and HTML sanitization for the **HOP** family of applications behind [hel.ink](https://hel.ink).
+The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink)), as one Laravel package. LinkHop, BioHop and the hub use it, so a link or a bio page is judged the same way in every app.
 
-`hop/safety` protects the ecosystem against phishing, malware, malicious redirects, SSRF attempts, and XSS across short links (LinkHop) and bio pages (BioHop).
+## What it provides
 
----
+| Class | What it does |
+| --- | --- |
+| `Hop\Safety\LinkSafety` | Judges a destination URL (and the text around it) against keyword patterns, risky hosts, the shared domain blacklist, local threat feeds and optional online lookups. |
+| `Hop\Safety\UrlGuard` | Decides whether the server may fetch a URL: http or https only, and every address the host resolves to must be public. It can also pin the connection to the addresses it checked. |
+| `Hop\Safety\SafeContent` | Cleans user content before it is shown: sanitizes HTML, turns an unsafe link into `#`, and strips what could break out of a `<style>` element. |
+| `Hop\Safety\Models\DomainBlacklist` | The Eloquent model of the `domain_blacklist` table. |
+| `abuse:feeds` | Artisan command that downloads the URLhaus and OpenPhish feeds. |
 
-## Features
+## Requirements
 
-- **URL Guard (`UrlGuard`)**:
-  - Restricts URL schemes to `http` and `https` (strictly blocks dangerous schemes like `javascript:`, `data:`, `file:`).
-  - Protects against SSRF by disallowing private IP ranges, localhost, link-local, and loopback addresses.
-- **Threat Detection (`LinkSafety`)**:
-  - Checks target domains against the shared ecosystem database table `domain_blacklist`.
-  - Integrates with external reputation feeds (URLhaus, PhishTank, Spamhaus DBL).
-- **HTML Sanitization (`SafeContent`)**:
-  - Sanitizes user-submitted rich content and markdown using Symfony HTML Sanitizer with strict safe element and attribute policies.
-- **Threat Feed Sync (`abuse:feeds`)**:
-  - Automated console command to keep local blacklist tables updated against real-time threat databases.
-
----
+- PHP 8.3, Laravel 12 (`illuminate/support` ^12.0) and `symfony/html-sanitizer` ^7.4.
+- For the blacklist, a `domain_blacklist` table with `domain`, `match_type` (`exact` or `wildcard`) and `category`. LinkHop owns the table and the other apps only read it. Without the table `LinkSafety` treats the blacklist as empty.
 
 ## Installation
 
-Within a HOP ecosystem app, add the repository reference in `composer.json`:
+The package is not on Packagist and has no tagged release yet. Add the repository to the app's `composer.json` and require `dev-main`, pinning a commit if you want a fixed version:
 
 ```json
 "repositories": [
@@ -33,7 +29,7 @@ Within a HOP ecosystem app, add the repository reference in `composer.json`:
     }
 ],
 "require": {
-    "hop/safety": "^0.1.0"
+    "hop/safety": "dev-main"
 }
 ```
 
@@ -43,25 +39,43 @@ Then run:
 composer update hop/safety
 ```
 
-The `Hop\Safety\SafetyServiceProvider` will auto-register with Laravel package discovery.
+Laravel's package discovery registers `Hop\Safety\SafetyServiceProvider`. It merges the `safety` config, binds `LinkSafety` as a scoped instance (so the blacklist is loaded once per request or job) and registers `abuse:feeds` when running in the console. To change the config, publish it:
 
----
+```bash
+php artisan vendor:publish --tag=hop-safety-config
+```
 
 ## Usage
 
-### Validating a Destination URL
+### Checking a destination URL
+
+`LinkSafety::rejectionReason()` returns a message you can show to the user, or `null` when the URL is allowed. The second argument is text found near the URL (a title or description), the third is the list of allowed schemes. It defaults to `LinkSafety::WEB_SCHEMES` (`http`, `https`); `LinkSafety::BIO_SCHEMES` adds `mailto`, `tel` and `sms`.
 
 ```php
 use Hop\Safety\LinkSafety;
 
-if (LinkSafety::isBlocked($url)) {
-    return back()->withErrors(['url' => 'Target domain is flagged as dangerous or malicious.']);
+$reason = app(LinkSafety::class)->rejectionReason($url, $title);
+if ($reason !== null) {
+    return back()->withErrors(['url' => $reason]);
 }
 ```
 
-### Fetching a user-supplied URL (SSRF and DNS rebinding)
+A URL is rejected when its scheme is not allowed, when its host is missing, or when it matches a category listed in `safety.block_categories`. This call also asks the online providers (see below).
 
-`UrlGuard::isSafe($url)` answers whether a URL points at a public address. If you then hand the URL to an HTTP client, the client looks the host up again and a hostile DNS server can answer differently the second time (DNS rebinding). To avoid that, resolve once with `resolve()` and make the client connect to the addresses that were checked:
+`assess()` gives the detail instead of a verdict: a score and the list of signals found. It skips the online providers unless you pass `remote: true`.
+
+```php
+$result = app(LinkSafety::class)->assess($url, $text);
+// for example ['score' => 110, 'signals' => ['gambling', 'chained_shortener', 'executable_download']]
+```
+
+The signals are `csam`, `gambling`, `phishing`, `scam` and `adult` (keyword patterns), `dangerous_scheme` (`javascript:`, `data:`, `vbscript:`, `file:`, `blob:`), `ip_host`, `punycode`, `chained_shortener`, `file_host`, `risky_tld`, `executable_download`, `blacklisted` (plus the blacklist row's own category), `malware` and `phishing` from the feeds, and `malware` from the online providers. Each signal adds its weight from `safety.weights` to the score.
+
+### Fetching a user-supplied URL
+
+`UrlGuard::isSafe($url)` answers whether a URL may be fetched from the server. It accepts only `http` and `https`, resolves the host, and refuses the URL if any resolved address is private or reserved. That covers loopback, link-local (including cloud metadata addresses such as `169.254.169.254`) and the private ranges.
+
+`isSafe()` only gives a yes or no. If you then hand the URL to an HTTP client, the client looks the host up again, and a hostile DNS server can answer differently the second time (DNS rebinding). To close that gap, call `resolve()` once and make the client connect to the addresses that were checked:
 
 ```php
 use Hop\Safety\UrlGuard;
@@ -72,7 +86,7 @@ $target = $guard->resolve($url);   // null when the URL is not safe
 if ($target === null) {
     throw new RuntimeException('Address not allowed');
 }
-// $target = ['scheme' => 'https', 'host' => 'example.com', 'port' => 443, 'ips' => ['93.184.216.34', ...]]
+// ['scheme' => 'https', 'host' => 'example.com', 'port' => 443, 'ips' => ['93.184.216.34', ...]]
 
 $response = Http::withOptions([
     'allow_redirects' => false,
@@ -80,29 +94,70 @@ $response = Http::withOptions([
 ])->get($url);
 ```
 
-Follow redirects yourself and call `resolve()` again for every `Location`. `isSafe()` keeps working as before and is `resolve() !== null`.
+`curlResolve()` returns one `host:port:address` entry per checked address. Follow redirects yourself and call `resolve()` again for every `Location`. `isSafe()` is `resolve() !== null`.
 
-### Sanitizing Rich HTML / Markdown Content
+When a host has several addresses, libcurl keeps only the last entry for a given host and port, so the request goes to the last checked address and does not fall back to the others. The address is always one that passed the check.
+
+### Sanitizing user content
 
 ```php
 use Hop\Safety\SafeContent;
 
-$cleanHtml = SafeContent::sanitize($rawUserHtml);
+$html = SafeContent::html($rawUserHtml);
+$href = SafeContent::url($userUrl);          // '#' unless the scheme is allowed
+$css  = SafeContent::css($userCss);
 ```
 
-### Updating Threat Feeds
+- `html()` keeps formatting tags and drops scripts, event handlers, styles, forms and links that are not `http`, `https`, `mailto` or `tel`. Links get `rel="nofollow noreferrer noopener"` and `target="_blank"`. Input is cut at 50,000 characters.
+- `url()` returns a same-site path as is, and any other value only if its scheme is in the allowed list (by default `LinkSafety::BIO_SCHEMES`). Everything else becomes `#`.
+- `css()` removes `<`, `@import`, `expression(`, `javascript:`, `behavior:` and `-moz-binding`, so custom CSS cannot close its `<style>` element or load scripts.
+- `isSitePath()` tells a real same-site path from one a browser would read as another host, such as `/\evil.com`.
 
-Run via cron or task scheduler:
+Apply these when rendering, not only when saving, so rows stored before a rule existed are covered.
+
+### Threat feeds
 
 ```bash
 php artisan abuse:feeds
 ```
 
-A feed is downloaded to a temporary file, checked and then moved over the old one, so a failed, truncated or empty download never replaces a good list. Downloads larger than `safety.feed_max_bytes` (64 MB by default, `THREAT_FEED_MAX_BYTES`) are aborted.
+The command downloads the URLhaus online malware list and the OpenPhish community feed into `storage/app/threat-feeds/malware.txt` and `phishing.txt`. `LinkSafety` matches a URL against them exactly (scheme and a leading `www.` ignored), so a shared platform is not blocked as a whole. LinkHop runs the command daily.
 
----
+A feed is downloaded to a temporary file, checked and then moved over the old one. A failed, truncated, empty or non-URL download keeps the previous list. A download larger than `safety.feed_max_bytes` is aborted. The command fails only when every feed failed.
 
-## HOP Family Ecosystem
+### Online lookups
+
+When `rejectionReason()` runs (or `assess(..., remote: true)`), three optional providers are asked, and a hit adds the `malware` signal. Answers are cached for `safety.providers.cache_hours` (12). A provider that is unreachable or returns an error never blocks a URL.
+
+- Spamhaus DBL over DNS, on by default (`SPAMHAUS_DBL`). It needs a DNS resolver that Spamhaus accepts, which public resolvers are not.
+- Google Safe Browsing, used when `SAFE_BROWSING_KEY` is set.
+- URLhaus host lookup, used when `URLHAUS_AUTH_KEY` is set.
+
+## Configuration
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SAFE_BROWSING_KEY` | none | Enables the Google Safe Browsing lookup. |
+| `URLHAUS_AUTH_KEY` | none | Enables the URLhaus host lookup. |
+| `SPAMHAUS_DBL` | `true` | Spamhaus DBL lookup over DNS. |
+| `THREAT_FEED_MAX_BYTES` | `67108864` (64 MB) | Largest feed `abuse:feeds` accepts. |
+| `ABUSE_REGISTER_PER_HOUR` | `3` | Read by the apps, not by this package. |
+
+The rest lives in `config/safety.php`: the keyword `patterns`, `block_categories`, the `weights` of each signal, and the lists `shorteners`, `file_hosts` and `risky_tlds`. The keys `thresholds`, `suspend_after_disabled_items` and `purge_after_days` are read by the `abuse:scan` command of LinkHop and BioHop, not by this package.
+
+## Tests
+
+The tests in `tests/Feature` are Pest tests that run inside an app that uses the package (HEL.ink includes a copy in `packages/safety`). This repository's own CI checks that `composer.json` is valid, that every PHP file lints under PHP 8.3, and that the family table below matches the canonical one.
+
+## Security
+
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md), not in public issues.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## HOP family
 
 <!-- hop-family:start -->
 <!-- Generated from HEL.ink resources/hop-assets/apps.source.json; edit there, then run scripts/hop_assets.py build. -->
@@ -115,8 +170,6 @@ A feed is downloaded to a temporary file, checked and then moved over the old on
 | **NoteHop** | [note.hel.ink](https://note.hel.ink) · `n.hel.ink/…` | [navi-crwn/NoteHop](https://github.com/navi-crwn/NoteHop) | Encrypted notes you share with a link. |
 | **Imperium** | private (owner only) | private | The HOP control panel. |
 <!-- hop-family:end -->
-
----
 
 ## License
 
