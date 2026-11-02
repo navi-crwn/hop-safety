@@ -59,6 +59,29 @@ if (LinkSafety::isBlocked($url)) {
 }
 ```
 
+### Fetching a user-supplied URL (SSRF and DNS rebinding)
+
+`UrlGuard::isSafe($url)` answers whether a URL points at a public address. If you then hand the URL to an HTTP client, the client looks the host up again and a hostile DNS server can answer differently the second time (DNS rebinding). To avoid that, resolve once with `resolve()` and make the client connect to the addresses that were checked:
+
+```php
+use Hop\Safety\UrlGuard;
+use Illuminate\Support\Facades\Http;
+
+$guard = app(UrlGuard::class);
+$target = $guard->resolve($url);   // null when the URL is not safe
+if ($target === null) {
+    throw new RuntimeException('Address not allowed');
+}
+// $target = ['scheme' => 'https', 'host' => 'example.com', 'port' => 443, 'ips' => ['93.184.216.34', ...]]
+
+$response = Http::withOptions([
+    'allow_redirects' => false,
+    'curl' => [CURLOPT_RESOLVE => $guard->curlResolve($target)],
+])->get($url);
+```
+
+Follow redirects yourself and call `resolve()` again for every `Location`. `isSafe()` keeps working as before and is `resolve() !== null`.
+
 ### Sanitizing Rich HTML / Markdown Content
 
 ```php
@@ -74,6 +97,8 @@ Run via cron or task scheduler:
 ```bash
 php artisan abuse:feeds
 ```
+
+A feed is downloaded to a temporary file, checked and then moved over the old one, so a failed, truncated or empty download never replaces a good list. Downloads larger than `safety.feed_max_bytes` (64 MB by default, `THREAT_FEED_MAX_BYTES`) are aborted.
 
 ---
 
