@@ -15,9 +15,9 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 - Rewrote the README. It now shows the real API (`LinkSafety::rejectionReason()` and `assess()`, `SafeContent::html()`), lists the feeds and online providers that exist (URLhaus, OpenPhish, Spamhaus DBL, Google Safe Browsing), and tells apps to require `dev-main` because there is no tag.
 - Added this changelog.
 
-### Known issue
+### Fixed
 
-- When a host resolves to several addresses, `curlResolve()` returns one entry per address and libcurl keeps only the last one for a host and port, so there is no fallback to the other addresses. The connection still goes to a checked address.
+- `curlResolve()` returns one `host:port:address1,address2` entry instead of one entry per address. libcurl keeps only the last entry for a host and port, so the pin used to point at the last address only (an IPv6 address for most dual-stack hosts) and connections failed on machines without IPv6.
 
 ## Earlier history
 

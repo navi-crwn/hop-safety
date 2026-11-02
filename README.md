@@ -94,9 +94,9 @@ $response = Http::withOptions([
 ])->get($url);
 ```
 
-`curlResolve()` returns one `host:port:address` entry per checked address. Follow redirects yourself and call `resolve()` again for every `Location`. `isSafe()` is `resolve() !== null`.
+`curlResolve()` returns a single `host:port:address1,address2` entry that lists every checked address. Follow redirects yourself and call `resolve()` again for every `Location`. `isSafe()` is `resolve() !== null`.
 
-When a host has several addresses, libcurl keeps only the last entry for a given host and port, so the request goes to the last checked address and does not fall back to the others. The address is always one that passed the check.
+All addresses go into one entry because libcurl keeps only the last entry for a given host and port; with one entry per address the request would be pinned to the last address only, and fail on a machine without IPv6. With one entry, libcurl tries the checked addresses and the request never goes to an address that was not checked.
 
 ### Sanitizing user content
 
