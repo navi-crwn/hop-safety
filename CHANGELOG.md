@@ -6,6 +6,8 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 
 ### Added
 
+- `EncryptedNoteLink` and the `encrypted_note_key` signal. `LinkSafety::rejectionReason()` refuses an address on a NoteHop host (`safety.note_hosts`, `HOP_NOTE_HOSTS`) whose fragment carries a `k` or `a` parameter, however a browser would read it (`#?k=`, full-width or percent-encoded host, one slash after the scheme, an Android intent fallback, and so on), in a URL and in free text. The class also offers `withoutFragment()`, `withoutSecrets()`, `scrub()` and `scrubJson()` for cleaning what apps already stored.
+- `ext-intl` is now required (UTS 46 host mapping). Without it a host that is not plain ASCII is read as unknown, and an unknown host with a secret fragment is refused.
 - `UrlGuard::resolve()` returns the checked target (scheme, host, port and public addresses) and `UrlGuard::curlResolve()` turns it into `CURLOPT_RESOLVE` entries, so an HTTP client can connect to the addresses that were checked instead of resolving the host again (DNS rebinding). `isSafe()` is now `resolve() !== null`.
 - `safety.feed_max_bytes` (`THREAT_FEED_MAX_BYTES`, 64 MB by default): the largest threat feed `abuse:feeds` accepts.
 

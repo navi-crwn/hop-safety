@@ -7,6 +7,7 @@ The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink))
 | Class | What it does |
 | --- | --- |
 | `Hop\Safety\LinkSafety` | Judges a destination URL (and the text around it) against keyword patterns, risky hosts, the shared domain blacklist, local threat feeds and optional online lookups. |
+| `Hop\Safety\EncryptedNoteLink` | Recognises an encrypted NoteHop address, whose key sits in the `#fragment`, so an app that stores destinations can refuse it. `LinkSafety` uses it. |
 | `Hop\Safety\UrlGuard` | Decides whether the server may fetch a URL: http or https only, and every address the host resolves to must be public. It can also pin the connection to the addresses it checked. |
 | `Hop\Safety\SafeContent` | Cleans user content before it is shown: sanitizes HTML, turns an unsafe link into `#`, and strips what could break out of a `<style>` element. |
 | `Hop\Safety\Models\DomainBlacklist` | The Eloquent model of the `domain_blacklist` table. |
@@ -14,7 +15,7 @@ The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink))
 
 ## Requirements
 
-- PHP 8.3, Laravel 12 (`illuminate/support` ^12.0) and `symfony/html-sanitizer` ^7.4.
+- PHP 8.3, `ext-intl`, Laravel 12 (`illuminate/support` ^12.0) and `symfony/html-sanitizer` ^7.4. `ext-intl` is how `EncryptedNoteLink` reads a host the way a browser does.
 - For the blacklist, a `domain_blacklist` table with `domain`, `match_type` (`exact` or `wildcard`) and `category`. LinkHop owns the table and the other apps only read it. Without the table `LinkSafety` treats the blacklist as empty.
 
 ## Installation
@@ -60,7 +61,7 @@ if ($reason !== null) {
 }
 ```
 
-A URL is rejected when its scheme is not allowed, when its host is missing, or when it matches a category listed in `safety.block_categories`. This call also asks the online providers (see below).
+A URL is rejected when its scheme is not allowed, when its host is missing, when it is an encrypted NoteHop address (see below), or when it matches a category listed in `safety.block_categories`. This call also asks the online providers (see below).
 
 `assess()` gives the detail instead of a verdict: a score and the list of signals found. It skips the online providers unless you pass `remote: true`.
 
@@ -70,6 +71,16 @@ $result = app(LinkSafety::class)->assess($url, $text);
 ```
 
 The signals are `csam`, `gambling`, `phishing`, `scam` and `adult` (keyword patterns), `dangerous_scheme` (`javascript:`, `data:`, `vbscript:`, `file:`, `blob:`), `ip_host`, `punycode`, `chained_shortener`, `file_host`, `risky_tld`, `executable_download`, `blacklisted` (plus the blacklist row's own category), `malware` and `phishing` from the feeds, and `malware` from the online providers. Each signal adds its weight from `safety.weights` to the score.
+
+### Encrypted NoteHop links
+
+A NoteHop link keeps the note key in the fragment (`https://n.hel.ink/TOKEN#k=KEY`, and `&a=` for the owner link). Browsers never send a fragment to a server, which is why NoteHop cannot read the note. An app that stores such a link as a destination, a bio link or a report would hold the key in its database, its logs and its redirects. `rejectionReason()` therefore refuses a NoteHop address whose fragment has a `k` or `a` parameter with a value, in a URL and in free text, and `assess()` reports it as the `encrypted_note_key` signal (weight 0, it is refused when saved and never scored).
+
+The address is read the way a browser reads it, not the way `parse_url()` does: tabs and line breaks dropped, control characters trimmed, any number of slashes after `https:`, a backslash ending the host, the last `@` ending the user info, percent escapes, full-width letters, `U+3002`, soft hyphens and a trailing dot all reach the host the browser would connect to, and `#?k=KEY` is the `k` parameter because `URLSearchParams` drops one `?`. An Android `intent://` address is searched for a NoteHop fallback address. Other hosts, other fragments and `?k=` in the query (which NoteHop does not read) are ordinary destinations.
+
+The hosts are `safety.note_hosts` (`HOP_NOTE_HOSTS`, default `note.hel.ink,n.hel.ink`). An app can add more, for example from its app registry, with `EncryptedNoteLink::resolveHostsUsing(fn () => [...])`.
+
+The same class helps apps clean what they already hold: `withoutFragment($url)`, `withoutSecrets($url)` (only `k` and `a` leave the fragment), and `scrub($text)` and `scrubJson($json)` (every NoteHop address in a text or a JSON column; other hosts' fragments stay).
 
 ### Fetching a user-supplied URL
 
@@ -130,7 +141,7 @@ A feed is downloaded to a temporary file, checked and then moved over the old on
 When `rejectionReason()` runs (or `assess(..., remote: true)`), three optional providers are asked, and a hit adds the `malware` signal. Answers are cached for `safety.providers.cache_hours` (12). A provider that is unreachable or returns an error never blocks a URL.
 
 - Spamhaus DBL over DNS, on by default (`SPAMHAUS_DBL`). It needs a DNS resolver that Spamhaus accepts, which public resolvers are not.
-- Google Safe Browsing, used when `SAFE_BROWSING_KEY` is set.
+- Google Safe Browsing, used when `SAFE_BROWSING_KEY` is set. Only the address without its `#fragment` is sent (a fragment is never sent to a server, so it is not told to a third party either), and the cached answer is keyed the same way.
 - URLhaus host lookup, used when `URLHAUS_AUTH_KEY` is set.
 
 ## Configuration
@@ -141,13 +152,14 @@ When `rejectionReason()` runs (or `assess(..., remote: true)`), three optional p
 | `URLHAUS_AUTH_KEY` | none | Enables the URLhaus host lookup. |
 | `SPAMHAUS_DBL` | `true` | Spamhaus DBL lookup over DNS. |
 | `THREAT_FEED_MAX_BYTES` | `67108864` (64 MB) | Largest feed `abuse:feeds` accepts. |
+| `HOP_NOTE_HOSTS` | `note.hel.ink,n.hel.ink` | Comma-separated NoteHop hosts whose links carry the key in the fragment (self-hosted installs add theirs). |
 | `ABUSE_REGISTER_PER_HOUR` | `3` | Read by the apps, not by this package. |
 
 The rest lives in `config/safety.php`: the keyword `patterns`, `block_categories`, the `weights` of each signal, and the lists `shorteners`, `file_hosts` and `risky_tlds`. The keys `thresholds`, `suspend_after_disabled_items` and `purge_after_days` are read by the `abuse:scan` command of LinkHop and BioHop, not by this package.
 
 ## Tests
 
-The tests in `tests/Feature` are Pest tests that run inside an app that uses the package (HEL.ink includes a copy in `packages/safety`). This repository's own CI checks that `composer.json` is valid, that every PHP file lints under PHP 8.3, and that the family table below matches the canonical one.
+The tests in `tests/Feature` are Pest tests that run inside an app that uses the package (HEL.ink includes a copy in `packages/safety`). The tests in `tests/Unit` need no application. `tests/fixtures/note-link-variants.json` holds 64 spellings of a NoteHop address with the verdict of a WHATWG URL parser, produced by `tests/fixtures/note-link-truth.js` (Node). This repository's own CI checks that `composer.json` is valid, that every PHP file lints under PHP 8.3, and that the family table below matches the canonical one.
 
 ## Security
 
