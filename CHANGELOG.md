@@ -17,6 +17,7 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- `LinkSafety::assess(..., remote: true)` sent the whole URL, fragment included, to Google Safe Browsing when `SAFE_BROWSING_KEY` was set, so the key of an encrypted note link left the server. The fragment is now cut before any outside lookup, and the cache key of the answer no longer includes it.
 - `curlResolve()` returns one `host:port:address1,address2` entry instead of one entry per address. libcurl keeps only the last entry for a host and port, so the pin used to point at the last address only (an IPv6 address for most dual-stack hosts) and connections failed on machines without IPv6.
 
 ## Earlier history

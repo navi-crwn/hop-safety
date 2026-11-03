@@ -69,6 +69,8 @@ class LinkSafety
             }
         }
         $url = trim((string) $url);
+        // A fragment never reaches the destination server, so it is not sent to outside lookups either.
+        $remoteUrl = explode('#', $url, 2)[0];
         if ($url !== '') {
             $scheme = $this->scheme($url);
             if ($scheme !== null && in_array($scheme, self::DANGEROUS_SCHEMES, true)) {
@@ -99,7 +101,7 @@ class LinkSafety
                         $signals[] = $category;
                     }
                 }
-                if ($remote && in_array($scheme, self::WEB_SCHEMES, true) && $this->isKnownMalicious($url, $host)) {
+                if ($remote && in_array($scheme, self::WEB_SCHEMES, true) && $this->isKnownMalicious($remoteUrl, $host)) {
                     $signals[] = 'malware';
                 }
             }
