@@ -113,9 +113,14 @@ class LinkSafety
                 if ($this->hostInList($host, config('safety.file_hosts', []))) {
                     $signals[] = 'file_host';
                 }
-                $tld = substr((string) strrchr($host, '.'), 1);
-                if (in_array($tld, config('safety.risky_tlds', []), true)) {
+                if ($this->hasRiskyTld($host)) {
                     $signals[] = 'risky_tld';
+                }
+                if ($this->hostInList($host, config('safety.tunnel_hosts', []))) {
+                    $signals[] = 'tunnel_host';
+                }
+                if ($this->spoofsBrand($host, $url)) {
+                    $signals[] = 'brand_spoof';
                 }
                 if ($this->hasRandomSubdomain($host)) {
                     $signals[] = 'random_subdomain';
@@ -134,7 +139,7 @@ class LinkSafety
             if ($category = $this->feedCategory($url)) {
                 $signals[] = $category;
             }
-            if (preg_match('/\.(apk|exe|scr|msi|bat|cmd|vbs|jar)(\?|#|$)/i', $url)) {
+            if (preg_match('/\.(apk|exe|scr|msi|bat|cmd|ps1|vbs|jar)(\?|#|$)/i', $url)) {
                 $signals[] = 'executable_download';
             }
         }
@@ -156,6 +161,47 @@ class LinkSafety
         }
 
         return urldecode(trim(($parts['path'] ?? '').' '.($parts['query'] ?? '').' '.($parts['fragment'] ?? '')));
+    }
+
+    /**
+     * True when the host ends in one of safety.risky_tlds, which may be a public suffix of more than one label
+     * (my.id). A label of the same name elsewhere in the host (xyz.example.com) does not count.
+     */
+    private function hasRiskyTld(string $host): bool
+    {
+        foreach (config('safety.risky_tlds', []) as $tld) {
+            if (str_ends_with($host, '.'.$tld)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * True when the host or the path carries the name of an Indonesian bank, wallet or institution
+     * (safety.brand_keywords) and the host is not that institution's domain or one of its subdomains
+     * (safety.official_domains). Labels and segments are compared whole; a name of seven characters or more also
+     * matches inside one (bankmandiri-login), a shorter one never does (bandana is not dana).
+     */
+    private function spoofsBrand(string $host, string $url): bool
+    {
+        $keywords = config('safety.brand_keywords', []);
+        if ($keywords === [] || $this->hostInList($host, config('safety.official_domains', []))) {
+            return false;
+        }
+        $path = parse_url($url, PHP_URL_PATH);
+        $tokens = preg_split('/[^a-z0-9]+/', strtolower($host.'/'.urldecode(is_string($path) ? $path : '')), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($keywords as $keyword) {
+            $keyword = strtolower($keyword);
+            foreach ($tokens as $token) {
+                if ($token === $keyword || (strlen($keyword) >= 7 && str_contains($token, $keyword))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
