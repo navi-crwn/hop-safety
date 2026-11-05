@@ -21,6 +21,12 @@ class LinkSafety
 
     private const DANGEROUS_SCHEMES = ['javascript', 'data', 'vbscript', 'file', 'blob'];
 
+    /** Domains the package blocks on its own, in the domain_blacklist table's row format. */
+    public const BUNDLED_BLACKLIST = __DIR__.'/../resources/domain_blacklist.json';
+
+    /** Second-level labels that are public suffixes under a country code (co.uk, com.au, co.id, or.id). */
+    private const PUBLIC_SECOND_LEVELS = ['co', 'com', 'net', 'org', 'gov', 'edu', 'ac', 'or', 'go', 'web', 'my', 'biz', 'sch', 'mil', 'info', 'ne', 'id', 'in'];
+
     /** @var array{exact: array<string, string|null>, wildcard: array<int, array{0: string, 1: string|null}>}|null */
     private ?array $blacklist = null;
 
@@ -74,7 +80,9 @@ class LinkSafety
     public function assess(?string $url, string $text = '', bool $remote = false): array
     {
         $signals = [];
-        $haystack = trim($text.' '.$url);
+        // The address is matched as typed and as a person reads it (path and query decoded), so a phrase hidden as
+        // /account-security-compliance or ?t=yes%2C+it+was+me is seen the same way as in a page title.
+        $haystack = trim($text.' '.$url.' '.$this->readableUrl((string) $url));
         foreach (config('safety.patterns', []) as $category => $pattern) {
             if ($haystack !== '' && preg_match($pattern, $haystack)) {
                 $signals[] = $category;
@@ -109,6 +117,9 @@ class LinkSafety
                 if (in_array($tld, config('safety.risky_tlds', []), true)) {
                     $signals[] = 'risky_tld';
                 }
+                if ($this->hasRandomSubdomain($host)) {
+                    $signals[] = 'random_subdomain';
+                }
                 $category = $this->blacklistCategory($host);
                 if ($category !== false) {
                     $signals[] = 'blacklisted';
@@ -132,6 +143,76 @@ class LinkSafety
         $score = array_sum(array_map(fn ($s) => (int) ($weights[$s] ?? 0), $signals));
 
         return ['score' => $score, 'signals' => $signals];
+    }
+
+    /**
+     * The path, query and fragment of an address the way a browser shows them: percent-decoded, '+' as a space.
+     */
+    private function readableUrl(string $url): string
+    {
+        $parts = parse_url(trim($url));
+        if (! is_array($parts)) {
+            return '';
+        }
+
+        return urldecode(trim(($parts['path'] ?? '').' '.($parts['query'] ?? '').' '.($parts['fragment'] ?? '')));
+    }
+
+    /**
+     * True when a label left of the registrable domain looks machine-generated: phishing kits put every victim on a
+     * throwaway subdomain (mjdgdqgk.example.com). Domains where such labels are normal (CDNs, object storage, the
+     * HOP family) are listed in safety.known_domains and never count.
+     */
+    private function hasRandomSubdomain(string $host): bool
+    {
+        if (filter_var($host, FILTER_VALIDATE_IP) || $this->hostInList($host, config('safety.known_domains', []))) {
+            return false;
+        }
+        $labels = explode('.', $host);
+        $keep = $this->registrableLabels($labels);
+        foreach (array_slice($labels, 0, max(0, count($labels) - $keep)) as $label) {
+            if ($this->looksRandom($label)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * How many trailing labels make up the registrable domain: two (example.com), three under a public second-level
+     * suffix of a country code (example.co.uk, example.co.id).
+     *
+     * @param  array<int, string>  $labels
+     */
+    private function registrableLabels(array $labels): int
+    {
+        $n = count($labels);
+        if ($n < 3) {
+            return $n;
+        }
+        $tld = $labels[$n - 1];
+        $second = $labels[$n - 2];
+
+        return strlen($tld) === 2 && in_array($second, self::PUBLIC_SECOND_LEVELS, true) ? 3 : 2;
+    }
+
+    /**
+     * A label of seven or more letters and digits whose letters are almost all consonants (at most one vowel in
+     * five) reads as random: mjdgdqgk, xkpqtrvza, f3b9c2d7e1. Words, short labels and numbers do not; the odd
+     * consonant-only word (strengths) does, which only adds the signal's weight.
+     */
+    private function looksRandom(string $label): bool
+    {
+        $label = strtolower($label);
+        $alnum = preg_replace('/[^a-z0-9]/', '', $label) ?? '';
+        $letters = preg_replace('/[^a-z]/', '', $alnum) ?? '';
+        if (strlen($alnum) < 7 || strlen($letters) < 5) {
+            return false;
+        }
+        $vowels = preg_match_all('/[aeiouy]/', $letters);
+
+        return $vowels / strlen($letters) <= 0.2;
     }
 
     private function holdsNoteKey(?string $url, string $text): bool
@@ -198,13 +279,17 @@ class LinkSafety
         $this->blacklist = null;
     }
 
+    /**
+     * The bundled list (resources/domain_blacklist.json) plus the shared domain_blacklist table, when the app has it.
+     */
     private function loadBlacklist(): array
     {
         $list = ['exact' => [], 'wildcard' => []];
-        if (! Schema::hasTable('domain_blacklist')) {
-            return $list;
+        $rows = $this->bundledBlacklist();
+        if (Schema::hasTable('domain_blacklist')) {
+            $rows = array_merge($rows, DB::table('domain_blacklist')->get(['domain', 'match_type', 'category'])->all());
         }
-        foreach (DB::table('domain_blacklist')->get(['domain', 'match_type', 'category']) as $row) {
+        foreach ($rows as $row) {
             $domain = preg_replace('/^www\./', '', strtolower(trim($row->domain)));
             if ($row->match_type === 'wildcard') {
                 $pattern = '/^'.str_replace(['.', '*'], ['\.', '.*'], $domain).'$/i';
@@ -215,6 +300,25 @@ class LinkSafety
         }
 
         return $list;
+    }
+
+    /**
+     * Rows shipped with the package, in the table's shape (domain, match_type, category). A broken file is logged and
+     * ignored rather than taking every app down.
+     *
+     * @return array<int, object>
+     */
+    private function bundledBlacklist(): array
+    {
+        try {
+            $rows = json_decode((string) file_get_contents(self::BUNDLED_BLACKLIST), flags: JSON_THROW_ON_ERROR);
+        } catch (\Throwable $e) {
+            Log::error('hop/safety: bundled domain blacklist is unreadable', ['error' => $e->getMessage()]);
+
+            return [];
+        }
+
+        return array_values(array_filter((array) $rows, fn ($row) => is_object($row) && isset($row->domain, $row->match_type)));
     }
 
     /**

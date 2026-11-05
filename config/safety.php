@@ -18,7 +18,9 @@ return [
     'patterns' => [
         'csam' => '/\b(pthc|preteen|jailbait|lolicon|shotacon|pedophil\w*|hussyfan|babyj|opva|(child|kid)[\s_-]*porn|underage[\s_-]*(sex|porn|nude)|cp[\s_-]*(link|video|vid)s?)\b/i',
         'gambling' => '/(gacor|maxwin|togel|judi\s*online|sbobet|slot[\s_-]*(online|gacor|88|thailand|deposit|demo)|rtp[\s_-]*(live|slot)|toto[\s_-]*(macau|slot)|agen[\s_-]*(slot|togel|judi)|scatter[\s_-]*hitam|mahjong[\s_-]*ways)/i',
-        'phishing' => '/(verify[-_\s]*account|account[-_\s]*verif|secure[-_\s]*login|wallet[-_\s]*connect|seed[-_\s]*phrase|claim[-_\s]*airdrop|airdrop[-_\s]*claim|dana[-_\s]*kaget|klaim[-_\s]*hadiah|verifikasi[-_\s]*(akun|rekening)|update[-_\s]*rekening)/i',
+        'phishing' => '/(verify[-_\s]*account|account[-_\s]*verif|secure[-_\s]*login|wallet[-_\s]*connect|seed[-_\s]*phrase|claim[-_\s]*airdrop|airdrop[-_\s]*claim|dana[-_\s]*kaget|klaim[-_\s]*hadiah|verifikasi[-_\s]*(akun|rekening)|update[-_\s]*rekening'
+            // Telegram account-takeover kits (2026-11): the page title, the form and the confirm button.
+            .'|account[-_\s]*security[-_\s]*compliance|verification[-_\s]*code[-_\s]*and[-_\s]*two[-_\s]*step|two[-_\s]*step[-_\s]*password|yes,?[-_\s]*it[-_\s]*was[-_\s]*me\b|restore[-_\s]*(your[-_\s]*)?account[-_\s]*status)/i',
         'scam' => '/(double\s*your\s*(btc|crypto|money)|giveaway\s*(btc|eth|usdt)|investasi\s*(bodong|pasti\s*untung))/i',
         'adult' => '/\b(porn|xxx|bokep|ngentot|hentai|onlyfans\s*leak|colmek)\b/i',
     ],
@@ -45,6 +47,8 @@ return [
         'adult' => 10,
         'chained_shortener' => 10,
         'file_host' => 20,
+        // A machine-generated subdomain on an unknown domain: never enough to disable anything by itself.
+        'random_subdomain' => 30,
         'punycode' => 10,
         'ip_host' => 10,
         'risky_tld' => 5,
@@ -79,6 +83,17 @@ return [
         'doods.pro', 'dood.yt', 'dood.re', 'dood.wf', 'mixdrop.to', 'mixdrop.sx', 'streamtape.to', 'vidguard.to',
         'mp4upload.com', 'vtube.to', 'streamvid.net', 'terabox.com', '1024terabox.com', 'teraboxapp.com',
         'krakenfiles.com', 'pixeldrain.com', 'bunkr.si', 'bunkr.ru', 'bunkrr.su', 'cyberdrop.me', 'saint.to', 'saint2.su',
+    ],
+
+    // Domains where a random-looking subdomain is normal (CDNs, object storage, the HOP family): the
+    // random_subdomain signal never fires on them. Subdomains match (d1a2b3c4.cloudfront.net).
+    'known_domains' => [
+        'hel.ink',
+        'cloudfront.net', 'amazonaws.com', 'akamaized.net', 'akamaihd.net', 'akamai.net', 'edgesuite.net', 'edgekey.net',
+        'azureedge.net', 'windows.net', 'cloudflare.net', 'cloudflare.com', 'fastly.net', 'fastlylb.net',
+        'googleusercontent.com', 'googleapis.com', 'gstatic.com', 'ggpht.com', 'googlevideo.com',
+        'githubusercontent.com', 'fbcdn.net', 'cdninstagram.com', 'twimg.com', 'licdn.com', 'wp.com',
+        'imgix.net', 'cloudinary.com', 'b-cdn.net', 'r2.dev', 'digitaloceanspaces.com', 'backblazeb2.com', 'cdn77.org',
     ],
 
     'risky_tlds' => ['zip', 'mov', 'top', 'xyz', 'click', 'icu', 'cfd', 'sbs', 'rest', 'lol', 'buzz', 'cyou', 'monster'],
