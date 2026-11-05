@@ -6,7 +6,8 @@ The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink))
 
 | Class | What it does |
 | --- | --- |
-| `Hop\Safety\LinkSafety` | Judges a destination URL (and the text around it) against keyword patterns, risky hosts, the shared domain blacklist, local threat feeds and optional online lookups. |
+| `Hop\Safety\LinkSafety` | Judges a destination URL (and the text around it) against keyword patterns, risky hosts, brand spoofing, the shared domain blacklist, local threat feeds and optional online lookups. |
+| `Hop\Safety\LinkVerdict` | Follows a link through its redirects and turns the score into one answer, a `Verdict`: `allow`, `interstitial` or `block`, with the reasons, the final address and the hop count. |
 | `Hop\Safety\EncryptedNoteLink` | Recognises an encrypted NoteHop address, whose key sits in the `#fragment`, so an app that stores destinations can refuse it. `LinkSafety` uses it. |
 | `Hop\Safety\UrlGuard` | Decides whether the server may fetch a URL: http or https only, and every address the host resolves to must be public. It can also pin the connection to the addresses it checked. |
 | `Hop\Safety\SafeContent` | Cleans user content before it is shown: sanitizes HTML, turns an unsafe link into `#`, and strips what could break out of a `<style>` element. |
@@ -70,7 +71,66 @@ $result = app(LinkSafety::class)->assess($url, $text);
 // for example ['score' => 110, 'signals' => ['gambling', 'chained_shortener', 'executable_download']]
 ```
 
-The signals are `csam`, `gambling`, `phishing`, `scam` and `adult` (keyword patterns), `dangerous_scheme` (`javascript:`, `data:`, `vbscript:`, `file:`, `blob:`), `ip_host`, `punycode`, `chained_shortener`, `file_host`, `risky_tld`, `executable_download`, `blacklisted` (plus the blacklist row's own category), `malware` and `phishing` from the feeds, and `malware` from the online providers. Each signal adds its weight from `safety.weights` to the score.
+The signals are `csam`, `gambling`, `phishing`, `scam` and `adult` (keyword patterns), `dangerous_scheme` (`javascript:`, `data:`, `vbscript:`, `file:`, `blob:`), `ip_host`, `punycode`, `chained_shortener`, `file_host`, `risky_tld`, `tunnel_host`, `brand_spoof`, `random_subdomain`, `executable_download`, `blacklisted` (plus the blacklist row's own category), `malware` and `phishing` from the feeds, and `malware` from the online providers. Each signal adds its weight from `safety.weights` to the score.
+
+- `risky_tld`: the host ends in one of `safety.risky_tlds`, which may be a public suffix of more than one label (`my.id`, `biz.id`).
+- `tunnel_host`: the host is one of `safety.tunnel_hosts` or a subdomain of one (ngrok, Cloudflare quick tunnels, localtunnel, serveo, localhost.run). A hard block: a page on them lives for an afternoon and no reputation list can know it.
+- `brand_spoof`: a host label or path segment carries the name of an Indonesian bank, wallet or institution from `safety.brand_keywords` (`klikbca`, `brimo`, `livin`, `mandiri`, `bni`, `bsi`, `dana`, `kaget`, `ovo`, `gopay`, `shopeepay`, `telegram`, `whatsapp`, `kominfo`, `undian`, `blokir`, `tarif`), and the host is not one of `safety.official_domains` or a subdomain of one. A name of six characters or fewer only matches a whole label or segment (`bni.example.com`, `/dana`), so `bandana.com` or `omnibus` never match; a longer name also matches inside one (`bankmandiri-login`, `telegramweb`). The path is read percent-decoded. The official list (`klikbca.com`, `bca.co.id`, `bri.co.id`, `bankmandiri.co.id`, `bni.co.id`, `bankbsi.co.id`, `dana.id`, `ovo.id`, `gopay.co.id`, `shopee.co.id`, `telegram.org`, `t.me`, `whatsapp.com`, `wa.me`, `kominfo.go.id`, `komdigi.go.id`) covers the domain and its subdomains only: `klikbca.com.example.xyz` and `notklikbca.com` are spoofs.
+- `executable_download`: the address ends in `.apk`, `.exe`, `.scr`, `.msi`, `.bat`, `.cmd`, `.ps1`, `.vbs` or `.jar`. A hard block.
+
+### The link verdict
+
+`LinkVerdict::evaluate()` is the one answer the apps act on when a visitor follows a link: send them on, show a warning page first, or refuse. It follows the link through its redirects, scores the address it lands on (and the one that was submitted) with `LinkSafety::assess()`, adds what only the fetch can tell, and turns the total into a verdict.
+
+```php
+use Hop\Safety\LinkVerdict;
+use Hop\Safety\Verdict;
+
+$verdict = app(LinkVerdict::class)->evaluate($url, guest: $link->user_id === null, text: $link->title);
+
+if ($verdict->blocks()) {
+    abort(451);
+}
+if ($verdict->needsInterstitial()) {
+    return view('interstitial', ['destination' => $verdict->finalUrl, 'reasons' => $verdict->reasons]);
+}
+return redirect()->away($verdict->finalUrl);
+```
+
+`Verdict` is a value object:
+
+| Property | Meaning |
+| --- | --- |
+| `verdict` | `Verdict::ALLOW` (`allow`), `Verdict::INTERSTITIAL` (`interstitial`) or `Verdict::BLOCK` (`block`). `allows()`, `needsInterstitial()` and `blocks()` say the same. |
+| `score` | The sum of `safety.weights` for every reason. |
+| `reasons` | The signals found, once each, as keys for the app to translate (`blacklisted`, `brand_spoof`, `redirect_chain`, `guest`, ...), never prose. |
+| `finalUrl` | The address the link lands on after its redirects, or the submitted address when nothing was followed. |
+| `hops` | How many redirects were followed. |
+
+`toArray()` gives the same with `final_url` as the key, for a JSON answer or a log line.
+
+The arguments: `guest` is true when the link was made without an account; `text` is the title or description around the link; `unroll: false` skips the network entirely and judges the address alone (for a check at creation time or a scan over stored links); `remote: false` skips the online providers.
+
+How the link is followed:
+
+- Every hop goes through `UrlGuard::resolve()` first and the request is pinned to the addresses it checked. A hop whose host has no DNS answer, or resolves to a private or local address, is never fetched and ends the chain as unresolved.
+- Each hop is a `HEAD` request, and a `GET` when the server refuses `HEAD` or the request fails. The body is never read: the response is streamed and only the status and headers are used. Timeout `safety.verdict.timeout` (4 s) per hop, with the mobile User-Agent of `safety.verdict.user_agent`, because kits often serve a harmless page to a desktop browser.
+- Up to `safety.verdict.max_hops` (5) redirects are followed; relative `Location` headers are resolved against the hop that sent them. More than that, a transport error, or an error status (4xx, 5xx) on the final hop count as unresolved.
+
+The signals only the verdict adds:
+
+| Reason | Weight | When |
+| --- | --- | --- |
+| `redirect_chain` | 25 | `safety.verdict.chain_hops` (3) or more redirects. |
+| `unresolved_destination` | 50 | The destination could not be verified (see above). Not a block on its own. |
+| `executable_download` | 100 | The final `Content-Type` is one of `safety.verdict.executable_types` (an Android package, a Windows executable or installer), whatever the address looks like. |
+| `guest` | 25 | The link was made by a guest. |
+| `guest_ip_host` | 100 | A guest's link whose host is a bare IP address. |
+| `invalid_url` | 100 | Not a web address: no scheme, no host, or a scheme other than `http` and `https`. Nothing is fetched. |
+
+The thresholds are `safety.verdict.thresholds`: a score of 70 or more is `block`, 30 or more is `interstitial`, anything lower is `allow`. With the default weights a link made by a guest to a `.xyz` domain is an interstitial (30 + 25), a bank name on an unofficial host under a risky TLD is a block for everyone (55 + 30), and an `.apk`, a tunnel host, a blacklisted domain or a guest's link to a bare IP is a block on its own.
+
+`LinkVerdict` is bound as a scoped instance, like `LinkSafety`. It does not cache; the apps decide when to re-check a stored link.
 
 ### Encrypted NoteHop links
 
@@ -155,11 +215,11 @@ When `rejectionReason()` runs (or `assess(..., remote: true)`), three optional p
 | `HOP_NOTE_HOSTS` | `note.hel.ink,n.hel.ink` | Comma-separated NoteHop hosts whose links carry the key in the fragment (self-hosted installs add theirs). |
 | `ABUSE_REGISTER_PER_HOUR` | `3` | Read by the apps, not by this package. |
 
-The rest lives in `config/safety.php`: the keyword `patterns`, `block_categories`, the `weights` of each signal, and the lists `shorteners`, `file_hosts` and `risky_tlds`. The keys `thresholds`, `suspend_after_disabled_items` and `purge_after_days` are read by the `abuse:scan` command of LinkHop and BioHop, not by this package.
+The rest lives in `config/safety.php`: the keyword `patterns`, `block_categories`, the `weights` of each signal, the lists `shorteners`, `file_hosts`, `risky_tlds`, `tunnel_hosts`, `brand_keywords`, `official_domains` and `known_domains`, and the `verdict` settings (`thresholds`, `max_hops`, `chain_hops`, `timeout`, `user_agent`, `executable_types`). The keys `thresholds`, `suspend_after_disabled_items` and `purge_after_days` are read by the `abuse:scan` command of LinkHop and BioHop, not by this package.
 
 ## Tests
 
-The tests in `tests/Feature` are Pest tests that run inside an app that uses the package (HEL.ink includes a copy in `packages/safety`). The tests in `tests/Unit` need no application. `tests/fixtures/note-link-variants.json` holds 64 spellings of a NoteHop address with the verdict of a WHATWG URL parser, produced by `tests/fixtures/note-link-truth.js` (Node). This repository's own CI checks that `composer.json` is valid, that every PHP file lints under PHP 8.3, and that the family table below matches the canonical one.
+The tests in `tests/Feature` are Pest tests that run inside an app that uses the package (HEL.ink includes a copy in `packages/safety`). The tests in `tests/Unit` need no application. `tests/fixtures/note-link-variants.json` holds 64 spellings of a NoteHop address with the verdict of a WHATWG URL parser, produced by `tests/fixtures/note-link-truth.js` (Node). `tests/fixtures/verdict-cases.json` lists addresses with the verdict expected of them, among them the phishing hosts that reached LinkHop; the verdict tests fake DNS and HTTP and never touch the network. This repository's own CI checks that `composer.json` is valid, that every PHP file lints under PHP 8.3, and that the family table below matches the canonical one.
 
 ## Security
 

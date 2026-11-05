@@ -26,7 +26,7 @@ return [
     ],
 
     // Rejected at creation time and auto-actioned by abuse:scan.
-    'block_categories' => ['csam', 'gambling', 'phishing', 'scam', 'malware', 'blacklisted', 'dangerous_scheme', 'encrypted_note_key'],
+    'block_categories' => ['csam', 'gambling', 'phishing', 'scam', 'malware', 'blacklisted', 'dangerous_scheme', 'encrypted_note_key', 'executable_download', 'tunnel_host'],
 
     // Hosts of NoteHop, whose links carry the note key in the #fragment (see EncryptedNoteLink). Add a self-hosted
     // install's domains with HOP_NOTE_HOSTS=note.example.com,n.example.com.
@@ -40,18 +40,34 @@ return [
         'dangerous_scheme' => 100,
         // Refused when saved; weight 0 so abuse:scan never disables a page or a person over it.
         'encrypted_note_key' => 0,
+        // Hard blocks of the link verdict: an APK or Windows executable (by URL or by the final Content-Type) and a
+        // temporary tunnel host (ngrok, Cloudflare quick tunnels, localtunnel and the like).
+        'executable_download' => 100,
+        'tunnel_host' => 100,
+        // A bare IP address as the destination of a link made by a guest.
+        'guest_ip_host' => 100,
+        // Not a web address at all (no scheme, no host, or a scheme a browser would not open as a page).
+        'invalid_url' => 100,
         'phishing' => 80,
         'gambling' => 60,
         'scam' => 60,
-        'executable_download' => 40,
+        // An Indonesian bank, wallet or institution name on a host or path that is not the official domain.
+        'brand_spoof' => 55,
+        // The final destination could not be verified: no DNS answer, a private address, a connection error, an
+        // error status, or more than safety.verdict.max_hops redirects. Never a block on its own.
+        'unresolved_destination' => 50,
         'adult' => 10,
         'chained_shortener' => 10,
         'file_host' => 20,
         // A machine-generated subdomain on an unknown domain: never enough to disable anything by itself.
         'random_subdomain' => 30,
+        // The link redirects three times or more before it lands.
+        'redirect_chain' => 25,
+        // The link was made by a guest (no account), the verdict engine's guest penalty.
+        'guest' => 25,
         'punycode' => 10,
         'ip_host' => 10,
-        'risky_tld' => 5,
+        'risky_tld' => 30,
     ],
 
     // abuse:scan thresholds (per subject).
@@ -96,7 +112,45 @@ return [
         'imgix.net', 'cloudinary.com', 'b-cdn.net', 'r2.dev', 'digitaloceanspaces.com', 'backblazeb2.com', 'cdn77.org',
     ],
 
-    'risky_tlds' => ['zip', 'mov', 'top', 'xyz', 'click', 'icu', 'cfd', 'sbs', 'rest', 'lol', 'buzz', 'cyou', 'monster'],
+    // High-risk TLDs (and public suffixes such as my.id), matched as the end of the host. One list for the
+    // risky_tld signal of LinkSafety::assess() and the link verdict.
+    'risky_tlds' => ['zip', 'mov', 'top', 'xyz', 'click', 'icu', 'cfd', 'sbs', 'rest', 'lol', 'buzz', 'cyou', 'monster', 'my.id', 'biz.id'],
+
+    // Temporary tunnel services, where a page exists for an afternoon and no reputation list can know it. A link to
+    // them (or to a subdomain) is a hard block.
+    'tunnel_hosts' => ['ngrok-free.app', 'ngrok.io', 'ngrok.app', 'ngrok.dev', 'trycloudflare.com', 'loca.lt', 'serveo.net', 'localhost.run'],
+
+    // Names of Indonesian banks, wallets and institutions that phishing pages borrow, matched in the host labels and
+    // path segments (percent-decoded, lower case). A word of six characters or fewer only counts as a whole label or
+    // segment (bni.example.com, /dana), so bandana or omnibus never match; a longer one also counts inside a label
+    // (bankmandiri-login, telegramweb). The signal is brand_spoof.
+    'brand_keywords' => [
+        'klikbca', 'brimo', 'livin', 'mandiri', 'bni', 'bsi', 'dana', 'kaget', 'ovo', 'gopay', 'shopeepay',
+        'telegram', 'whatsapp', 'kominfo', 'undian', 'blokir', 'tarif',
+    ],
+
+    // The real domains of those names. On them and on their subdomains brand_spoof never fires; a look-alike such
+    // as klikbca.com.example.xyz or notklikbca.com is not one of them.
+    'official_domains' => [
+        'klikbca.com', 'bca.co.id', 'bri.co.id', 'bankmandiri.co.id', 'bni.co.id', 'bankbsi.co.id', 'dana.id',
+        'ovo.id', 'gopay.co.id', 'shopee.co.id', 'telegram.org', 't.me', 'whatsapp.com', 'wa.me',
+        'kominfo.go.id', 'komdigi.go.id',
+    ],
+
+    // The link verdict (LinkVerdict::evaluate()): the score of every signal above, plus the guest penalty, becomes
+    // block (>= block), interstitial (>= interstitial) or allow.
+    'verdict' => [
+        'thresholds' => ['block' => 70, 'interstitial' => 30],
+        // Redirects followed before the destination counts as unresolved. Three or more add redirect_chain.
+        'max_hops' => 5,
+        'chain_hops' => 3,
+        // Seconds per hop, for connecting and for the headers.
+        'timeout' => 4,
+        // The link is fetched the way the victims' phones fetch it; kits often serve a harmless page to desktops.
+        'user_agent' => 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        // Final Content-Type values that mean an installer or an executable, whatever the URL looks like.
+        'executable_types' => ['application/vnd.android.package-archive', 'application/x-msdownload', 'application/x-msdos-program', 'application/x-ms-installer', 'application/x-dosexec'],
+    ],
 
     // Optional external reputation lookups (skipped when the key is empty).
     'providers' => [
