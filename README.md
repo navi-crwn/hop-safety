@@ -16,7 +16,7 @@ The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink))
 ## Requirements
 
 - PHP 8.3, `ext-intl`, Laravel 12 (`illuminate/support` ^12.0) and `symfony/html-sanitizer` ^7.4. `ext-intl` is how `EncryptedNoteLink` reads a host the way a browser does.
-- For the blacklist, a `domain_blacklist` table with `domain`, `match_type` (`exact` or `wildcard`) and `category`. LinkHop owns the table and the other apps only read it. Without the table `LinkSafety` treats the blacklist as empty.
+- For the blacklist, a `domain_blacklist` table with `domain`, `match_type` (`exact` or `wildcard`) and `category`. LinkHop owns the table and the other apps only read it. Without the table `LinkSafety` only uses the list the package ships, `resources/domain_blacklist.json`, which has the same columns and is read next to the table.
 
 ## Installation
 
