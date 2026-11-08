@@ -61,6 +61,8 @@ return [
         'file_host' => 20,
         // A machine-generated subdomain on an unknown domain: never enough to disable anything by itself.
         'random_subdomain' => 30,
+        // A provider that was asked could not answer: unverified, never a block on its own.
+        'unverified_destination' => 30,
         // The link redirects three times or more before it lands.
         'redirect_chain' => 25,
         // The link was made by a guest (no account), the verdict engine's guest penalty.
@@ -150,6 +152,9 @@ return [
         'user_agent' => 'Mozilla/5.0 (Linux; Android 14; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
         // Final Content-Type values that mean an installer or an executable, whatever the URL looks like.
         'executable_types' => ['application/vnd.android.package-archive', 'application/x-msdownload', 'application/x-msdos-program', 'application/x-ms-installer', 'application/x-dosexec'],
+        // Add the unverified_destination signal when a provider that was asked could not answer (Safe Browsing down,
+        // a timeout, a 5xx). Off means the link is judged without it, which reads as safe; keep it on.
+        'unverified_signal' => (bool) env('VERDICT_UNVERIFIED_SIGNAL', true),
     ],
 
     // Optional external reputation lookups (skipped when the key is empty).
@@ -160,6 +165,11 @@ return [
         'spamhaus_dbl' => (bool) env('SPAMHAUS_DBL', true),
         'timeout' => 5,
         'cache_hours' => 12,
+        // Safe Browsing v5 (Hop\Safety\SafeBrowsing): block/warn data is never trusted for longer than this, whatever
+        // cacheDuration the provider asks for; a failed lookup is remembered only this long so a recovered provider
+        // is asked again soon. A lookup sends four-byte SHA-256 prefixes, never the address.
+        'threat_cache_minutes' => max(1, (int) env('SAFE_BROWSING_THREAT_CACHE_MINUTES', 30)),
+        'unknown_cache_minutes' => max(1, (int) env('SAFE_BROWSING_UNKNOWN_CACHE_MINUTES', 5)),
     ],
 
     // Largest threat feed (abuse:feeds) accepted, in bytes. A bigger download is dropped and the previous feed kept.

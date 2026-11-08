@@ -47,6 +47,14 @@ class LinkVerdict
         }
 
         $signals = $this->safety->assess($finalUrl, $text, remote: $remote)['signals'];
+        // A provider that could not be asked is not a reason to allow: the link is unverified, not safe.
+        if ($remote && config('safety.verdict.unverified_signal', true)) {
+            foreach ($this->safety->providerStatus($finalUrl) as $provider => $status) {
+                if ($status === 'unknown' && $provider === 'safe_browsing' && ! empty(config('safety.providers.safe_browsing_key'))) {
+                    $signals[] = 'unverified_destination';
+                }
+            }
+        }
         if ($finalUrl !== $url) {
             $signals = array_merge($signals, $this->safety->assess($url, '', remote: false)['signals']);
         }

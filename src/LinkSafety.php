@@ -35,6 +35,8 @@ class LinkSafety
 
     private ?EncryptedNoteLink $notes = null;
 
+    private ?SafeBrowsing $browsing = null;
+
     /** Knows the address of an encrypted NoteHop note (its key is in the #fragment). Override to add hosts. */
     protected function notes(): EncryptedNoteLink
     {
@@ -377,9 +379,33 @@ class LinkSafety
             return false;
         }
 
-        return Cache::remember('abuse:remote:'.sha1($url), now()->addHours((int) ($cfg['cache_hours'] ?? 12)), function () use ($url, $host, $cfg) {
-            return $this->spamhausHit($host, $cfg) || $this->safeBrowsingHit($url, $cfg) || $this->urlhausHit($host, $cfg);
+        // Each provider keeps its own answer and its own cache (Safe Browsing inside Hop\Safety\SafeBrowsing, the
+        // other two here on the host), so a failed lookup at one provider never hides what another one knows.
+        if ($this->spamhausHit($host, $cfg) || $this->safeBrowsingHit($url)) {
+            return true;
+        }
+
+        return Cache::remember('abuse:remote:urlhaus:'.sha1($host), now()->addHours((int) ($cfg['cache_hours'] ?? 12)), function () use ($host, $cfg) {
+            return $this->urlhausHit($host, $cfg);
         });
+    }
+
+    /**
+     * What the outside providers said about this address, for a caller that must tell "nothing known" from "could not
+     * ask": safe_browsing (blocked/clean/unknown), urlhaus (hit/miss/unknown) and spamhaus (hit/miss/unknown).
+     *
+     * @return array{safe_browsing: string, urlhaus: string, spamhaus: string}
+     */
+    public function providerStatus(?string $url): array
+    {
+        $cfg = (array) config('safety.providers', []);
+        $url = trim((string) $url);
+        $host = $this->host($url) ?? '';
+        $sb = $this->browsing()->check($url)['status'];
+        $urlhaus = empty($cfg['urlhaus_auth_key']) ? 'unknown' : ($this->urlhausHit($host, $cfg) ? 'hit' : 'miss');
+        $spamhaus = (($cfg['spamhaus_dbl'] ?? false) && $host !== '') ? ($this->spamhausHit($host, $cfg) ? 'hit' : 'miss') : 'unknown';
+
+        return ['safe_browsing' => $sb, 'urlhaus' => $urlhaus, 'spamhaus' => $spamhaus];
     }
 
     /**
@@ -424,31 +450,16 @@ class LinkSafety
         return null;
     }
 
-    private function safeBrowsingHit(string $url, array $cfg): bool
+    /** Safe Browsing: v5 hashes:search, one instance so its answers are read once per request. */
+    public function browsing(): SafeBrowsing
     {
-        if (empty($cfg['safe_browsing_key'])) {
-            return false;
-        }
-        try {
-            $response = Http::timeout($cfg['timeout'] ?? 5)->post(
-                'https://safebrowsing.googleapis.com/v4/threatMatches:find?key='.$cfg['safe_browsing_key'],
-                [
-                    'client' => ['clientId' => 'hel.ink', 'clientVersion' => '2.1'],
-                    'threatInfo' => [
-                        'threatTypes' => ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION'],
-                        'platformTypes' => ['ANY_PLATFORM'],
-                        'threatEntryTypes' => ['URL'],
-                        'threatEntries' => [['url' => $url]],
-                    ],
-                ]
-            );
+        return $this->browsing ??= new SafeBrowsing;
+    }
 
-            return $response->ok() && ! empty($response->json('matches'));
-        } catch (\Throwable $e) {
-            Log::warning('Safe Browsing lookup failed', ['error' => $e->getMessage()]);
-
-            return false;
-        }
+    /** True only when the provider answered and matched; an unknown answer is not a hit and not a clean bill either. */
+    private function safeBrowsingHit(string $url): bool
+    {
+        return $this->browsing()->check($url)['status'] === SafeBrowsing::STATUS_BLOCKED;
     }
 
     private function urlhausHit(string $host, array $cfg): bool
