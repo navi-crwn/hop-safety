@@ -1,5 +1,7 @@
 # hop/safety
 
+**English** · [简体中文](README.zh-CN.md) · [Deutsch](README.de.md) · [Bahasa Indonesia](README.id.md) · [日本語](README.ja.md) · [Português (Brasil)](README.pt-BR.md) · [Español](README.es.md) · [Français](README.fr.md) · [Русский](README.ru.md)
+
 The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink)), as one Laravel package. LinkHop, BioHop and the hub use it, so a link or a bio page is judged the same way in every app.
 
 ## What it provides
@@ -229,6 +231,10 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md), not in public
 
 See [CHANGELOG.md](CHANGELOG.md).
 
+## Self-hosting
+
+You do not install this package by hand to run HOP. LinkHop and BioHop list this public repository in their `composer.json`, so `composer install` fetches it with no token, and the hub ([HEL.ink](https://github.com/navi-crwn/HEL.ink)) carries a copy in `packages/safety`. It works with no keys at all: Safe Browsing and URLhaus stay off until you set `SAFE_BROWSING_KEY` and `URLHAUS_AUTH_KEY`, the Spamhaus check is a DNS lookup that needs no key (`SPAMHAUS_DBL=false` turns it off), and without LinkHop's `domain_blacklist` table it uses the list it ships. If you run NoteHop, set `HOP_NOTE_HOSTS` to its host names, so encrypted note links on your domain are recognised; the default is the hel.ink ones. The family guide covers the rest: [docs/self-hosting.md](https://github.com/navi-crwn/HEL.ink/blob/main/docs/self-hosting.md).
+
 ## HOP family
 
 <!-- hop-family:start -->
@@ -240,7 +246,8 @@ See [CHANGELOG.md](CHANGELOG.md).
 | **BioHop** | [bio.hel.ink](https://bio.hel.ink) · `hel.ink/b/…` | [navi-crwn/BioHop](https://github.com/navi-crwn/BioHop) | One link-in-bio page for everything you do. |
 | **PixelHop** | [pixel.hel.ink](https://pixel.hel.ink) · `p.hel.ink/…` | [navi-crwn/PixelHop](https://github.com/navi-crwn/PixelHop) | Image hosting with albums and direct links. |
 | **NoteHop** | [note.hel.ink](https://note.hel.ink) · `n.hel.ink/…` | [navi-crwn/NoteHop](https://github.com/navi-crwn/NoteHop) | Encrypted notes you share with a link. |
-| **Imperium** | private (owner only) | private | The HOP control panel. |
+| **FileHop** | [file.hel.ink](https://file.hel.ink) | [navi-crwn/FileHop](https://github.com/navi-crwn/FileHop) | Convert files in your browser; nothing is uploaded. |
+| **Imperium** | not public-facing: optional, for admins | [navi-crwn/Imperium](https://github.com/navi-crwn/Imperium) | The HOP control panel. |
 <!-- hop-family:end -->
 
 ## License
