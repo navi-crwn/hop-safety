@@ -143,15 +143,23 @@ class LinkVerdict
      */
     private function fetch(string $url, array $target): ?Response
     {
+        if (! defined('CURLOPT_RESOLVE')) {
+            // Without curl the connection cannot be pinned to the checked addresses, so nothing is fetched, in
+            // any environment. Faking the Http client is no exemption: an unpinned fetch is a fetch.
+            return null;
+        }
         $timeout = (int) config('safety.verdict.timeout', 4);
-        $request = fn () => Http::withOptions([
-            'allow_redirects' => false,
-            'stream' => true,
-            'curl' => [CURLOPT_RESOLVE => $this->guard->curlResolve($target)],
-        ])
-            ->withUserAgent((string) config('safety.verdict.user_agent', 'Mozilla/5.0'))
-            ->connectTimeout($timeout)
-            ->timeout($timeout);
+        $request = function () use ($target, $timeout) {
+            $request = Http::withOptions([
+                'allow_redirects' => false,
+                'stream' => true,
+            ])->withUserAgent((string) config('safety.verdict.user_agent', 'Mozilla/5.0'))
+                ->connectTimeout($timeout)
+                ->timeout($timeout);
+            $request->withOptions(['curl' => [CURLOPT_RESOLVE => $this->guard->curlResolve($target)]]);
+
+            return $request;
+        };
         try {
             $response = $request()->head($url);
             if ($response->status() < 400) {
