@@ -76,3 +76,84 @@ jobs:
             echo "${failures} lint failure(s)" >&2
             exit 1
           fi
+
+  runtime-tests:
+    name: runtime tests (php 8.3, isolated harness)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          path: hop-safety
+
+      - name: setup php
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          extensions: curl, intl, mbstring, pdo_sqlite, sqlite3
+
+      # The 25 curl-gated tests fail closed (skip) when ext-curl is absent. Assert it before Pest so a
+      # broken runner can never turn real runs into invisible skips; the opposite 3 "no-curl fallback"
+      # tests are the only documented skips in this environment (exact-match gate below).
+      - name: assert php 8.3 and ext-curl before pest
+        run: |
+          set -euo pipefail
+          php -v
+          php -r 'if (!(version_compare(PHP_VERSION, "8.3.0", ">=") && version_compare(PHP_VERSION, "8.4.0", "<"))) { fwrite(STDERR, "unexpected PHP version: " . PHP_VERSION . PHP_EOL); exit(1); }'
+          php -r 'if (!extension_loaded("curl")) { fwrite(STDERR, "ext-curl missing; the curl-gated tests would be skipped" . PHP_EOL); exit(1); } echo "ext-curl " . phpversion("curl") . PHP_EOL;'
+
+      # Isolated harness: the committed minimal manifest + lock, tests copied byte-identical from the
+      # checkout. The package path-repo url "../../hop-safety" resolves against the workspace root, so the
+      # repo's own composer.json/composer.lock/vendor (tracked, intentionally stale) is never touched.
+      - name: prepare isolated harness
+        run: |
+          set -euo pipefail
+          H="$GITHUB_WORKSPACE/harness/hop-safety"
+          rm -rf "$GITHUB_WORKSPACE/harness"
+          mkdir -p "${H}"
+          cp hop-safety/.github/ci-runtime/composer.json "${H}/composer.json"
+          cp hop-safety/.github/ci-runtime/composer.lock "${H}/composer.lock"
+          mkdir -p "${H}/tests"
+          cp -R hop-safety/tests/. "${H}/tests/"
+          cp hop-safety/phpunit.xml "${H}/phpunit.xml"
+
+      - name: composer install (committed lock, no platform bypass)
+        run: |
+          set -euo pipefail
+          H="$GITHUB_WORKSPACE/harness/hop-safety"
+          # lock integrity, explicit: the copies the harness installs from must be byte-identical to the
+          # committed blobs, and composer install must not rewrite the lock
+          git -C hop-safety rev-parse "HEAD:.github/ci-runtime/composer.json" > "$RUNNER_TEMP/manifest-committed"
+          git -C hop-safety hash-object .github/ci-runtime/composer.json | diff "$RUNNER_TEMP/manifest-committed" -
+          git -C hop-safety rev-parse "HEAD:.github/ci-runtime/composer.lock" > "$RUNNER_TEMP/lock-committed"
+          git -C hop-safety hash-object .github/ci-runtime/composer.lock | diff "$RUNNER_TEMP/lock-committed" -
+          # strict as far as it can be: manifest + lock consistency is the hard contract (fresh lock file,
+          # no validation errors); the remaining advisory warning (unbound path-repo constraint "*") is
+          # deliberate and documented in .github/ci-runtime (PR merge-checkouts are detached, so the
+          # path-repo version is dev-<sha> and cannot be pinned in a committed lock)
+          composer --no-interaction --no-plugins --no-scripts validate --working-dir "${H}" | tee "$RUNNER_TEMP/composer-validate.txt"
+          if grep -q "is not up to date" "$RUNNER_TEMP/composer-validate.txt"; then
+            echo "harness lock file is stale against its manifest" >&2
+            exit 1
+          fi
+          (cd "${H}" && composer --no-interaction --no-progress install)
+          test "$(git -C hop-safety hash-object "${H}/composer.lock")" = "$(cat "$RUNNER_TEMP/lock-committed")" || { echo "composer rewrote the lock file" >&2; exit 1; }
+
+      - name: run pest (isolated, junit log)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/harness/hop-safety"
+          php vendor/bin/pest --configuration phpunit.xml --log-junit "$GITHUB_WORKSPACE/junit.xml" 2>&1 | tee "$GITHUB_WORKSPACE/pest.log"
+          pest_status="${PIPESTATUS[0]}"
+          test "${pest_status}" -eq 0 || { echo "pest failed with exit ${pest_status}" >&2; exit "${pest_status}"; }
+
+      # Expected dataset for the php 8.3 + ext-curl environment: 290 test cases total = 287 executed +
+      # 3 skipped (the documented no-curl fallbacks, allowlisted exactly by name). Any failure, error,
+      # renamed test, or different/additional skip fails the gate; a blanket skip rule is not possible.
+      - name: gate (exact test counts + skip allowlist)
+        run: |
+          set -euo pipefail
+          php hop-safety/.github/ci-runtime/junit-gate.php "$GITHUB_WORKSPACE/junit.xml" hop-safety/.github/ci-runtime/skips-with-curl.txt 290

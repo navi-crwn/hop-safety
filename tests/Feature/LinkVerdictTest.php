@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Http;
 
 const PUBLIC_IP = '93.184.216.34';
 
+// Skip reason for tests that exercise the pinned fetch itself: without ext-curl the fetch is never attempted
+// (fail closed), which the dedicated no-curl test asserts instead.
+const NEEDS_CURL = 'Needs ext-curl: without it the pinned fetch is never attempted (it fails closed).';
+
 /** Every host resolves to one public address unless the table says otherwise ([] means unresolvable). */
 function verdictGuard(array $dns = []): UrlGuard
 {
@@ -62,7 +66,7 @@ it('gives the expected verdict for every fixture', function (string $url, bool $
     foreach (json_decode(file_get_contents(__DIR__.'/../fixtures/verdict-cases.json'), true) as $case) {
         yield $case['name'] => [$case['url'], $case['guest'], $case['verdict']];
     }
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('returns a value object with the verdict, score, reasons, final url and hop count', function () {
     fakeWeb();
@@ -77,7 +81,7 @@ it('returns a value object with the verdict, score, reasons, final url and hop c
         ->and($v->blocks())->toBeFalse()
         ->and($v->needsInterstitial())->toBeFalse()
         ->and($v->toArray())->toBe(['verdict' => 'allow', 'score' => 0, 'reasons' => [], 'final_url' => 'https://github.com/navi-crwn', 'hops' => 0]);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('adds the guest penalty as a reason of its own', function () {
     fakeWeb();
@@ -87,7 +91,7 @@ it('adds the guest penalty as a reason of its own', function () {
         ->and(config('safety.weights.guest'))->toBe(25)
         ->and($v->reasons)->toBe(['guest'])
         ->and($v->verdict)->toBe(Verdict::ALLOW);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('turns the score into a verdict with the configured thresholds', function () {
     fakeWeb();
@@ -102,7 +106,7 @@ it('turns the score into a verdict with the configured thresholds', function () 
 
     config(['safety.verdict.thresholds.interstitial' => 31]);
     expect(engine()->evaluate($url)->verdict)->toBe(Verdict::ALLOW);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('feeds every existing LinkSafety signal into the same score', function () {
     fakeWeb();
@@ -127,7 +131,7 @@ it('follows redirects and reports the final address and the number of hops', fun
         ->and($v->reasons)->toContain('redirect_chain')
         ->and(config('safety.weights.redirect_chain'))->toBe(25)
         ->and($v->verdict)->toBe(Verdict::ALLOW);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('does not count one or two redirects against the link', function () {
     fakeWeb([
@@ -138,7 +142,7 @@ it('does not count one or two redirects against the link', function () {
     $v = engine()->evaluate('https://short.example/a');
 
     expect($v->hops)->toBe(2)->and($v->reasons)->not->toContain('redirect_chain')->and($v->score)->toBe(0);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('judges the final address, not only the one that was submitted', function () {
     fakeWeb(['https://short.example/a' => Http::response('', 302, ['Location' => 'https://x1.ngrok-free.app/login'])]);
@@ -147,7 +151,7 @@ it('judges the final address, not only the one that was submitted', function () 
 
     expect($v->reasons)->toContain('tunnel_host')->and($v->verdict)->toBe(Verdict::BLOCK)
         ->and($v->finalUrl)->toBe('https://x1.ngrok-free.app/login');
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('blocks when the final content is an Android package or a Windows executable', function (string $type) {
     fakeWeb(['https://cdn.example/download?id=42' => Http::response('', 200, ['Content-Type' => $type])]);
@@ -159,7 +163,7 @@ it('blocks when the final content is an Android package or a Windows executable'
     'apk' => ['application/vnd.android.package-archive'],
     'msdownload' => ['application/x-msdownload'],
     'msdos' => ['application/x-msdos-program; charset=binary'],
-]);
+])->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('asks with HEAD first and only falls back to GET when HEAD is refused', function () {
     Http::fake(function (Request $request) {
@@ -175,7 +179,7 @@ it('asks with HEAD first and only falls back to GET when HEAD is refused', funct
 
     $methods = Http::recorded()->map(fn ($pair) => $pair[0]->method().' '.$pair[0]->url())->all();
     expect($methods)->toBe(['HEAD https://easy.example/page', 'HEAD https://strict.example/page', 'GET https://strict.example/page']);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('fetches like a phone, with a short timeout, without the body and pinned to the checked addresses', function () {
     $seen = [];
@@ -187,16 +191,45 @@ it('fetches like a phone, with a short timeout, without the body and pinned to t
 
     engine()->evaluate('https://example.com/');
 
-    expect($seen)->toHaveCount(1);
-    [$request, $options] = $seen[0];
-    expect($request->header('User-Agent')[0])->toContain('Android', 'Mobile')
-        ->and(config('safety.verdict.timeout'))->toBe(4)
-        ->and($options['timeout'])->toBe(4)
-        ->and($options['connect_timeout'])->toBe(4)
-        ->and($options['allow_redirects'])->toBeFalse()
-        ->and($options['stream'])->toBeTrue()
-        ->and($options['curl'][CURLOPT_RESOLVE])->toBe(['example.com:443:'.PUBLIC_IP]);
+    if (defined('CURLOPT_RESOLVE')) {
+        expect($seen)->toHaveCount(1);
+        [$request, $options] = $seen[0];
+        expect($request->header('User-Agent')[0])->toContain('Android', 'Mobile')
+            ->and(config('safety.verdict.timeout'))->toBe(4)
+            ->and($options['timeout'])->toBe(4)
+            ->and($options['connect_timeout'])->toBe(4)
+            ->and($options['allow_redirects'])->toBeFalse()
+            ->and($options['stream'])->toBeTrue()
+            ->and($options['curl'][CURLOPT_RESOLVE])->toBe(['example.com:443:'.PUBLIC_IP]);
+    } else {
+        // Without curl the fetch fails closed before any request is built, so the fake sees nothing.
+        expect($seen)->toHaveCount(0);
+    }
 });
+
+it('fails closed for live fetches when curl cannot pin the resolved address, in every environment', function (string $env) {
+    app()->detectEnvironment(fn () => $env);
+    // No fakes here on purpose: stray requests are allowed through the stub layer so that anything reaching
+    // the transport layer is counted and refused by this middleware, which runs before the real handler and
+    // never opens a socket. A count above zero means a fetch was attempted without DNS pinning.
+    $attempts = 0;
+    Http::preventStrayRequests(false); // let stray requests reach the middleware below, which counts and refuses them
+    Http::globalMiddleware(function () use (&$attempts) {
+        return function ($request, $options) use (&$attempts) {
+            $attempts++;
+
+            throw new RuntimeException('network attempted in test');
+        };
+    });
+
+    $v = engine()->evaluate('https://example.com/', remote: false);
+
+    Http::assertNothingSent();
+    expect($attempts)->toBe(0, 'a fetch was attempted without DNS pinning')
+        ->and($v->reasons)->toContain('unresolved_destination')
+        ->and($v->verdict)->toBe(Verdict::INTERSTITIAL);
+})->with(['testing environment' => ['testing'], 'production environment' => ['production']])
+    ->skip(defined('CURLOPT_RESOLVE'), 'This checks the no-curl fallback.');
 
 it('stops after five hops and treats the chain as unresolved', function () {
     $responses = [];
@@ -211,7 +244,7 @@ it('stops after five hops and treats the chain as unresolved', function () {
         ->and(config('safety.verdict.max_hops'))->toBe(5)
         ->and($v->reasons)->toContain('unresolved_destination', 'redirect_chain')
         ->and(Http::recorded())->toHaveCount(6);
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('never fetches a hop that points at a private or local address', function () {
     fakeWeb(['https://short.example/meta' => Http::response('', 302, ['Location' => 'http://169.254.169.254/latest/meta-data/'])]);
@@ -222,7 +255,7 @@ it('never fetches a hop that points at a private or local address', function () 
     expect($v->reasons)->toContain('unresolved_destination')
         ->and($v->hops)->toBe(1)
         ->and($v->finalUrl)->toBe('http://169.254.169.254/latest/meta-data/');
-});
+})->skip(! defined('CURLOPT_RESOLVE'), NEEDS_CURL);
 
 it('never fetches a hop whose host resolves to a private address', function () {
     fakeWeb(['https://short.example/in' => Http::response('', 302, ['Location' => 'https://intranet.example/'])]);
