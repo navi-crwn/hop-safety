@@ -1,0 +1,8 @@
+# Documented skips for the runtime test run WITH ext-curl loaded (the CI gate
+# asserts ext-curl is present before Pest runs, so these are the only skips
+# allowed). Everything else must execute: the 25 curl-gated tests are covered
+# by the exact-match rule (any of them skipping shows up here as unexpected).
+# Names are the exact JUnit testcase names emitted by Pest 3 / PHPUnit 11.
+it fails closed for live fetches when curl cannot pin the resolved address, in every environment with data set "dataset "testing environment""
+it fails closed for live fetches when curl cannot pin the resolved address, in every environment with data set "dataset "production environment""
+without curl the command fails closed, keeps the previous files and makes no request
