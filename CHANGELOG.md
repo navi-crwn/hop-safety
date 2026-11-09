@@ -4,6 +4,8 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-10
+
 ### Safe Browsing v5
 - Safe Browsing is now v5 `hashes:search` (`Hop\Safety\SafeBrowsing`), not v4 `threatMatches:find`. The address no longer leaves the install at all: the lookup sends base64url four-byte SHA-256 prefixes of its expressions (the URL, the same without its query, the host, and the host with a slash), and a returned full hash is checked against those expressions before it counts, so a prefix collision is not a block. Threat types and attributes the client does not understand, and `CANARY`, are disregarded as the API requires.
 - The lookup answers `blocked`, `clean` or `unknown`. `unknown` is what a missing key, a failed request, an error status or an unreadable answer now produce; it is never reported as clean, and `LinkVerdict` adds the new `unverified_destination` signal (30, never a block on its own) when a provider that was asked could not answer.
