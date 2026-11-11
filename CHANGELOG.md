@@ -4,6 +4,12 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-11
+
+### Changed
+
+- README (and its 8 translations): the HOP family table now lists PayHop (`pay.hel.ink`). `scripts/check-hop-family.sh` can check against another HEL.ink ref or a local file (`--ref`, `--from`). No change in behaviour.
+
 ## [0.1.0] - 2026-11-10
 
 ### Safe Browsing v5
