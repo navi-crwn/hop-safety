@@ -34,14 +34,14 @@ return [
         'routes' => [
             [
                 'hosts' => ['youtu.be'],
-                'path' => '#^/(?<id>[A-Za-z0-9_-]{6,20})$#',
+                'path' => '#^/(?<id>[A-Za-z0-9_-]{6,20})\z#',
                 'query_passthrough' => true,
                 'ios' => 'youtube://youtu.be/{id}{query}',
                 'android' => ['intent' => 'youtu.be/{id}{query}', 'scheme' => 'https'],
             ],
             [
                 'hosts' => ['youtube.com'],
-                'path' => '#^/(?:watch|playlist|(?:shorts|live)/[A-Za-z0-9_-]{5,20})$#',
+                'path' => '#^/(?:watch|playlist|(?:shorts|live)/[A-Za-z0-9_-]{5,20})\z#',
                 'query_passthrough' => true,
                 'ios' => 'youtube://www.youtube.com/{path}{query}',
                 'android' => ['intent' => 'www.youtube.com/{path}{query}', 'scheme' => 'https'],
@@ -53,7 +53,7 @@ return [
         'hosts' => ['open.spotify.com'],
         'android_package' => 'com.spotify.music',
         'routes' => [[
-            'path' => '#^/(?:intl-[a-z]+/)?(?<type>track|album|artist|playlist|show|episode)/(?<id>[A-Za-z0-9]{10,30})/?$#',
+            'path' => '#^/(?:intl-[a-z]+/)?(?<type>track|album|artist|playlist|show|episode)/(?<id>[A-Za-z0-9]{10,30})/?\z#',
             'ios' => 'spotify:{type}:{id}',
             'android' => ['intent' => 'open.spotify.com/{type}/{id}', 'scheme' => 'https'],
         ]],
@@ -65,8 +65,8 @@ return [
         'routes' => [
             [
                 'hosts' => ['wa.me'],
-                'path' => '#^/(?<phone>\+?\d{6,16})?$#',
-                'query' => ['text' => '/^.{1,1000}$/su'],
+                'path' => '#^/(?<phone>\+?\d{6,16})?\z#',
+                'query' => ['text' => '/^.{1,1000}\z/su'],
                 'trim_start' => ['phone' => '+'],
                 'args' => ['phone' => 'phone', 'text' => 'text'],
                 'ios' => 'whatsapp://send{args}',
@@ -74,8 +74,8 @@ return [
             ],
             [
                 'hosts' => ['api.whatsapp.com'],
-                'path' => '#^/send/?$#',
-                'query' => ['phone' => '/^\+?\d{6,16}$/', 'text' => '/^.{1,1000}$/su'],
+                'path' => '#^/send/?\z#',
+                'query' => ['phone' => '/^\+?\d{6,16}\z/', 'text' => '/^.{1,1000}\z/su'],
                 'trim_start' => ['phone' => '+'],
                 'args' => ['phone' => 'phone', 'text' => 'text'],
                 'ios' => 'whatsapp://send{args}',
@@ -88,7 +88,7 @@ return [
         'hosts' => ['t.me', 'telegram.me'],
         'android_package' => 'org.telegram.messenger',
         'routes' => [[
-            'path' => '#^/(?<name>[A-Za-z0-9_]{4,32})/?$#',
+            'path' => '#^/(?<name>[A-Za-z0-9_]{4,32})/?\z#',
             'args' => ['domain' => 'name'],
             'ios' => 'tg://resolve{args}',
             'android' => ['intent' => 'resolve{args}', 'scheme' => 'tg'],
@@ -100,7 +100,7 @@ return [
         'android_package' => 'com.instagram.android',
         'routes' => [[
             // a profile only
-            'path' => '#^/(?!(?:p|reel|reels|stories|explore|accounts|direct|tv)/?$)(?<user>[A-Za-z0-9._]{1,30})/?$#i',
+            'path' => '#^/(?!(?:p|reel|reels|stories|explore|accounts|direct|tv)/?\z)(?<user>[A-Za-z0-9._]{1,30})/?\z#i',
             'args' => ['username' => 'user'],
             'ios' => 'instagram://user{args}',
             'android' => ['intent' => 'instagram.com/_u/{user}', 'scheme' => 'https'],
@@ -112,13 +112,13 @@ return [
         'android_package' => 'com.twitter.android',
         'routes' => [
             [
-                'path' => '#^/(?<user>[A-Za-z0-9_]{1,15})/status/(?<id>\d{5,25})/?$#',
+                'path' => '#^/(?<user>[A-Za-z0-9_]{1,15})/status/(?<id>\d{5,25})/?\z#',
                 'args' => ['id' => 'id'],
                 'ios' => 'twitter://status{args}',
                 'android' => ['intent' => 'twitter.com/{user}/status/{id}', 'scheme' => 'https'],
             ],
             [
-                'path' => '#^/(?!(?:home|explore|search|settings|i|intent|share|login|compose)/?$)(?<user>[A-Za-z0-9_]{1,15})/?$#i',
+                'path' => '#^/(?!(?:home|explore|search|settings|i|intent|share|login|compose)/?\z)(?<user>[A-Za-z0-9_]{1,15})/?\z#i',
                 'args' => ['screen_name' => 'user'],
                 'ios' => 'twitter://user{args}',
                 'android' => ['intent' => 'twitter.com/{user}', 'scheme' => 'https'],
@@ -131,7 +131,7 @@ return [
         'android_package' => 'com.zhiliaoapp.musically',
         'routes' => [[
             // a profile, Android only (iOS opens the app from TikTok's own universal link)
-            'path' => '#^/@(?<user>[A-Za-z0-9._]{2,24})/?$#',
+            'path' => '#^/@(?<user>[A-Za-z0-9._]{2,24})/?\z#',
             'ios' => null,
             'android' => ['intent' => 'www.tiktok.com/@{user}', 'scheme' => 'https'],
         ]],
@@ -142,8 +142,8 @@ return [
         'android_package' => 'us.zoom.videomeetings',
         'routes' => [[
             // a meeting
-            'path' => '#^/j/(?<id>\d{8,12})/?$#',
-            'query' => ['pwd' => '/^[A-Za-z0-9._~-]{1,200}$/'],
+            'path' => '#^/j/(?<id>\d{8,12})/?\z#',
+            'query' => ['pwd' => '/^[A-Za-z0-9._~-]{1,200}\z/'],
             'args' => ['confno' => 'id', 'pwd' => 'pwd'],
             'ios' => 'zoomus://zoom.us/join{args}',
             'android' => ['intent' => 'zoom.us/join{args}', 'scheme' => 'zoomus'],
@@ -153,7 +153,7 @@ return [
         'name' => 'App Store',
         'hosts' => ['apps.apple.com', 'itunes.apple.com'],
         'routes' => [[
-            'path' => '#^/(?:[a-z]{2}/)?app/(?:[A-Za-z0-9%._-]{1,100}/)?id\d{5,15}$#',
+            'path' => '#^/(?:[a-z]{2}/)?app/(?:[A-Za-z0-9%._-]{1,100}/)?id\d{5,15}\z#',
             'query_passthrough' => true,
             'ios' => 'itms-apps://{host}/{path}{query}',
             'android' => null,
@@ -163,8 +163,8 @@ return [
         'name' => 'Google Play',
         'hosts' => ['play.google.com'],
         'routes' => [[
-            'path' => '#^/store/apps/details$#',
-            'query' => ['id' => '/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/i'],
+            'path' => '#^/store/apps/details\z#',
+            'query' => ['id' => '/^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+\z/i'],
             'required' => ['id'],
             'args' => ['id' => 'id'],
             'ios' => null,

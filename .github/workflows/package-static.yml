@@ -150,10 +150,10 @@ jobs:
           pest_status="${PIPESTATUS[0]}"
           test "${pest_status}" -eq 0 || { echo "pest failed with exit ${pest_status}" >&2; exit "${pest_status}"; }
 
-      # Expected dataset for the php 8.3 + ext-curl environment: 418 test cases total = 415 executed +
+      # Expected dataset for the php 8.3 + ext-curl environment: 436 test cases total = 433 executed +
       # 3 skipped (the documented no-curl fallbacks, allowlisted exactly by name). Any failure, error,
       # renamed test, or different/additional skip fails the gate; a blanket skip rule is not possible.
       - name: gate (exact test counts + skip allowlist)
         run: |
           set -euo pipefail
-          php hop-safety/.github/ci-runtime/junit-gate.php "$GITHUB_WORKSPACE/junit.xml" hop-safety/.github/ci-runtime/skips-with-curl.txt 418
+          php hop-safety/.github/ci-runtime/junit-gate.php "$GITHUB_WORKSPACE/junit.xml" hop-safety/.github/ci-runtime/skips-with-curl.txt 436

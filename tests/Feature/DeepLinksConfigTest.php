@@ -68,6 +68,9 @@ it('leaves out an entry that is not valid instead of guessing', function (array 
     'ios intent scheme' => [deepApp(['routes' => [['ios' => 'intent://x#Intent;end', 'android' => null]]])],
     'ios file scheme' => [deepApp(['routes' => [['ios' => 'file:///etc/passwd', 'android' => null]]])],
     'an invalid pattern' => [deepApp(['routes' => [['path' => '#^/(room#']]])],
+    'path without a start anchor' => [deepApp(['routes' => [['path' => '#/room/(?<room>[a-z0-9]{3,20})\z#']]])],
+    'path without an end anchor' => [deepApp(['routes' => [['path' => '#^/room/(?<room>[a-z0-9]{3,20})#']]])],
+    'path anchored in the middle only' => [deepApp(['routes' => [['path' => '#^/room/(?<room>[a-z0-9]{3,20})/more#']]])],
     'no routes' => [array_merge(deepApp(), ['routes' => []])],
 ]);
 
@@ -131,3 +134,13 @@ it('does not depend on LinkHop or on anything outside the library and Laravel co
         }
     }
 });
+
+it('accepts a configured path pattern that ends in $ or \z', function (string $path) {
+    config(['safety.deep_links.apps' => ['example-chat' => deepApp(['routes' => [['path' => $path]]])]]);
+    expect((new DeepLinks)->resolve('https://chat.example.com/room/abc123')?->app)->toBe('example-chat');
+})->with([
+    'dollar' => ['#^/room/(?<room>[a-z0-9]{3,20})$#'],
+    'backslash z' => ['#^/room/(?<room>[a-z0-9]{3,20})\z#'],
+    'with a flag' => ['#^/room/(?<room>[a-z0-9]{3,20})\z#i'],
+    'another delimiter' => ['~^/room/(?<room>[a-z0-9]{3,20})\z~'],
+]);

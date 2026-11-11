@@ -22,20 +22,20 @@ it('recognises the places it knows and builds the app addresses', function (stri
     'youtube watch' => ['https://www.youtube.com/watch?v=abc123', 'YouTube', 'youtube://www.youtube.com/watch?v=abc123', 'com.google.android.youtube'],
     'youtu.be' => ['https://youtu.be/abc123', 'YouTube', 'youtube://youtu.be/abc123', 'com.google.android.youtube'],
     'spotify track' => ['https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC', 'Spotify', 'spotify:track:4uLU6hMCjMI75M1A2tKUQC', 'com.spotify.music'],
-    'whatsapp' => ['https://wa.me/628123456789?text=Hello%20there', 'WhatsApp', 'whatsapp://send?phone=628123456789&text=Hello%20there', 'com.whatsapp'],
+    'whatsapp' => ['https://wa.me/6200000000?text=Hello%20there', 'WhatsApp', 'whatsapp://send?phone=6200000000&text=Hello%20there', 'com.whatsapp'],
     'telegram' => ['https://t.me/hopfamily', 'Telegram', 'tg://resolve?domain=hopfamily', 'org.telegram.messenger'],
-    'instagram profile' => ['https://www.instagram.com/helena.studio/', 'Instagram', 'instagram://user?username=helena.studio', 'com.instagram.android'],
+    'instagram profile' => ['https://www.instagram.com/example.handle/', 'Instagram', 'instagram://user?username=example.handle', 'com.instagram.android'],
     'x profile' => ['https://x.com/hopfamily', 'X', 'twitter://user?screen_name=hopfamily', 'com.twitter.android'],
     'x post' => ['https://twitter.com/hopfamily/status/1234567890123', 'X', 'twitter://status?id=1234567890123', 'com.twitter.android'],
-    'zoom' => ['https://us02web.zoom.us/j/81234567890?pwd=abc', 'Zoom', 'zoomus://zoom.us/join?confno=81234567890&pwd=abc', 'us.zoom.videomeetings'],
+    'zoom' => ['https://us02web.zoom.us/j/12345678901?pwd=abc', 'Zoom', 'zoomus://zoom.us/join?confno=12345678901&pwd=abc', 'us.zoom.videomeetings'],
     'app store' => ['https://apps.apple.com/id/app/example/id123456789', 'App Store', 'itms-apps://apps.apple.com/id/app/example/id123456789', null],
 ]);
 
 it('knows google play and tiktok for Android only, and refuses what it cannot build', function () {
     $play = deep('https://play.google.com/store/apps/details?id=com.example.app');
     expect($play->toArray())->toBe(['app' => 'google-play', 'name' => 'Google Play', 'fallback' => 'https://play.google.com/store/apps/details?id=com.example.app', 'ios' => null, 'android' => 'market://details?id=com.example.app']);
-    $tiktok = deep('https://www.tiktok.com/@helena');
-    expect($tiktok->android)->toContain('package=com.zhiliaoapp.musically')->toContain('intent://www.tiktok.com/@helena#Intent;')->and($tiktok->ios)->toBeNull();
+    $tiktok = deep('https://www.tiktok.com/@example');
+    expect($tiktok->android)->toContain('package=com.zhiliaoapp.musically')->toContain('intent://www.tiktok.com/@example#Intent;')->and($tiktok->ios)->toBeNull();
     // not a profile, not a known place, not an https address
     foreach (['https://www.instagram.com/p/abc/', 'https://example.com/page', 'https://x.com/home', 'ftp://youtube.com/watch?v=1', 'https://play.google.com/store/apps/details?id=bad id'] as $url) {
         expect(deep($url))->toBeNull();
@@ -48,7 +48,7 @@ it('gives each platform its own address and nothing for another one', function (
         ->and($link->forPlatform('android'))->toStartWith('intent://resolve?domain=hopfamily#Intent;scheme=tg;package=org.telegram.messenger;')
         ->and($link->forPlatform('windows'))->toBeNull()
         ->and($link->app)->toBe('telegram');
-    expect(deep('https://www.tiktok.com/@helena')->forPlatform('ios'))->toBeNull();
+    expect(deep('https://www.tiktok.com/@example')->forPlatform('ios'))->toBeNull();
 });
 
 it('names the app of a destination', function () {
@@ -69,21 +69,21 @@ it('keeps what the destination carries: playlist, time, shorts and the whatsapp 
     expect(deep('https://www.youtube.com/watch?v=abc123&list=PL123&t=30s')->ios)->toBe('youtube://www.youtube.com/watch?v=abc123&list=PL123&t=30s');
     expect(deep('https://www.youtube.com/shorts/abc123XYZ')->ios)->toBe('youtube://www.youtube.com/shorts/abc123XYZ');
     expect(deep('https://wa.me/')->ios)->toBe('whatsapp://send');
-    expect(deep('https://wa.me/+628123456789')->ios)->toBe('whatsapp://send?phone=628123456789');
-    expect(deep('https://api.whatsapp.com/send?phone=628123456789&text=Hi')->ios)->toBe('whatsapp://send?phone=628123456789&text=Hi');
+    expect(deep('https://wa.me/+6200000000')->ios)->toBe('whatsapp://send?phone=6200000000');
+    expect(deep('https://api.whatsapp.com/send?phone=6200000000&text=Hi')->ios)->toBe('whatsapp://send?phone=6200000000&text=Hi');
     expect(deep('https://api.whatsapp.com/send?text=Hi')->ios)->toBe('whatsapp://send?text=Hi');
-    expect(deep('https://wa.me/628123456789?text=a%26b%3Dc%0Ad')->ios)->toBe('whatsapp://send?phone=628123456789&text=a%26b%3Dc%0Ad');
-    expect(deep('https://wa.me/628123456789?text=a+b')->ios)->toBe('whatsapp://send?phone=628123456789&text=a%20b');
+    expect(deep('https://wa.me/6200000000?text=a%26b%3Dc%20d')->ios)->toBe('whatsapp://send?phone=6200000000&text=a%26b%3Dc%20d');
+    expect(deep('https://wa.me/6200000000?text=a+b')->ios)->toBe('whatsapp://send?phone=6200000000&text=a%20b');
 });
 
 it('refuses a phone number or a pattern that is not what the route expects', function (string $url) {
     expect(deep($url))->toBeNull();
 })->with([
     'short phone' => ['https://wa.me/12345'],
-    'letters in phone' => ['https://wa.me/62812abc789'],
-    'phone in query' => ['https://api.whatsapp.com/send?phone=62812;package=evil'],
-    'text too long' => ['https://wa.me/628123456789?text='.str_repeat('a', 1001)],
-    'zoom password with a semicolon' => ['https://zoom.us/j/81234567890?pwd=ab;c'],
+    'letters in phone' => ['https://wa.me/6200abc000'],
+    'phone in query' => ['https://api.whatsapp.com/send?phone=6200;package=evil'],
+    'text too long' => ['https://wa.me/6200000000?text='.str_repeat('a', 1001)],
+    'zoom password with a semicolon' => ['https://zoom.us/j/12345678901?pwd=ab;c'],
     'spotify id too short' => ['https://open.spotify.com/track/abc'],
     'instagram post' => ['https://www.instagram.com/reel/abc/'],
     'twitter intent' => ['https://twitter.com/intent'],
@@ -118,10 +118,10 @@ it('refuses unknown hosts, look-alikes, userinfo, ports and IP literals', functi
     'prefix look-alike' => ['https://youtube.com.evil.test/watch?v=abc123'],
     'dash look-alike' => ['https://you-tube.com/watch?v=abc123'],
     'subdomain of a look-alike' => ['https://youtube.com.evil.com/watch?v=abc123'],
-    'zoom look-alike' => ['https://evilzoom.us/j/81234567890'],
-    'zoom with the real name inside' => ['https://zoom.us.evil.test/j/81234567890'],
-    'wa.me look-alike' => ['https://awa.me/628123456789'],
-    'wa.me subdomain' => ['https://evil.wa.me/628123456789'],
+    'zoom look-alike' => ['https://evilzoom.us/j/12345678901'],
+    'zoom with the real name inside' => ['https://zoom.us.evil.test/j/12345678901'],
+    'wa.me look-alike' => ['https://awa.me/6200000000'],
+    'wa.me subdomain' => ['https://evil.wa.me/6200000000'],
     'second subdomain' => ['https://a.www.youtube.com/watch?v=abc123'],
     'userinfo' => ['https://user@www.youtube.com/watch?v=abc123'],
     'decoy userinfo' => ['https://www.youtube.com@evil.test/watch?v=abc123'],
@@ -191,10 +191,10 @@ it('never lets the destination add to an intent address', function (string $url)
     'bad escape' => ['https://www.youtube.com/watch?v=abc%zz123'],
     'utf-8' => ['https://www.youtube.com/watch?v=abc%E2%82%AC123'],
     'raw utf-8' => ['https://www.youtube.com/watch?v=abc€123'],
-    'whatsapp text with everything' => ['https://wa.me/628123456789?text='.rawurlencode("a;b#c\"d'e\r\nf;package=com.evil;end")],
-    'whatsapp text raw' => ['https://wa.me/628123456789?text=a;package=com.evil;end'],
-    'whatsapp text hash' => ['https://wa.me/628123456789?text=a#b'],
-    'zoom password' => ['https://zoom.us/j/81234567890?pwd=abc%3Bend'],
+    'whatsapp text with everything' => ['https://wa.me/6200000000?text='.rawurlencode("a;b#c\"d'e\r\nf;package=com.evil;end")],
+    'whatsapp text raw' => ['https://wa.me/6200000000?text=a;package=com.evil;end'],
+    'whatsapp text hash' => ['https://wa.me/6200000000?text=a#b'],
+    'zoom password' => ['https://zoom.us/j/12345678901?pwd=abc%3Bend'],
     'app store query' => ['https://apps.apple.com/us/app/x/id123456789?mt=8;evil=1'],
     'x user with semicolon' => ['https://twitter.com/user;evil'],
     'x status with a path' => ['https://twitter.com/user/status/123456789;package=evil'],
@@ -237,4 +237,35 @@ it('does not read a fragment as part of the address', function () {
 
 it('is stable: the same destination always gives the same answer', function () {
     expect(deep('https://youtu.be/abc123?t=5')->toArray())->toBe(deep('https://youtu.be/abc123?t=5')->toArray());
+});
+
+// A value that decodes to a control character is never carried over: "$" would let a final line feed through a pattern.
+it('refuses a query that decodes to a control character', function (string $url) {
+    expect(deep($url))->toBeNull();
+})->with([
+    'trailing line feed in a phone' => ['https://api.whatsapp.com/send?phone=6200000000%0A'],
+    'trailing line feed in a text' => ['https://wa.me/6200000000?text=hello%0A'],
+    'line break inside a text' => ['https://wa.me/6200000000?text=a%0D%0Ab'],
+    'line feed in a zoom password' => ['https://zoom.us/j/12345678901?pwd=abc%0A'],
+    'line feed in a youtube value' => ['https://www.youtube.com/watch?v=abc123%0A'],
+    'nul' => ['https://www.youtube.com/watch?v=abc123%00'],
+    'delete' => ['https://www.youtube.com/watch?v=abc123%7F'],
+    'tab in a name' => ['https://www.youtube.com/watch?v=abc123&a%09b=1'],
+    'line feed in a play id' => ['https://play.google.com/store/apps/details?id=com.example.app%0A'],
+]);
+
+it('does not let a line feed through the end of a path', function () {
+    expect(deep("https://t.me/example\n"))->toBeNull()
+        ->and(deep('https://t.me/example%0A'))->toBeNull();
+});
+
+it('ends every pattern of the shipped table with \z', function () {
+    foreach (DeepLinks::defaults() as $app) {
+        foreach ($app['routes'] as $route) {
+            expect($route['path'])->toMatch('/\x5cz#[a-z]*$/');
+            foreach ($route['query'] ?? [] as $pattern) {
+                expect($pattern)->toMatch('/\x5cz\/[a-z]*$/');
+            }
+        }
+    }
 });

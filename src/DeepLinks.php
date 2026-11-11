@@ -22,7 +22,8 @@ namespace Hop\Safety;
  *
  * The apps are data: resources/deep-link-apps.php, extended or trimmed by the using app with
  * config('safety.deep_links.apps') (see the README). The configuration is trusted: its regular expressions run on
- * visitor-controlled text, so keep them anchored and simple.
+ * visitor-controlled text, so keep them simple. A route whose `path` pattern does not start with ^ and end with $ or \z is
+ * left out like any other invalid entry; end the patterns with \z, because $ also matches before a final line feed.
  */
 class DeepLinks
 {
@@ -157,7 +158,12 @@ class DeepLinks
                 continue;
             }
             [$name, $value] = array_pad(explode('=', $piece, 2), 2, '');
-            $pairs[] = [urldecode($name), urldecode($value)];
+            $name = urldecode($name);
+            $value = urldecode($value);
+            if (preg_match('/[\x00-\x1f\x7f]/', $name.$value)) {
+                return null; // %0A, %0D, %00... in a query: never a deep link
+            }
+            $pairs[] = [$name, $value];
         }
 
         return ['host' => $host, 'path' => ($m[2] ?? '') === '' ? '/' : $m[2], 'pairs' => $pairs];
@@ -360,13 +366,26 @@ class DeepLinks
         return $hosts && $routes ? ['name' => $name, 'hosts' => $hosts, 'android_package' => $package, 'routes' => $routes] : null;
     }
 
+    /** A path pattern has to match the whole path: its body starts with ^ and ends with $ or \z (\z is what the shipped table uses). */
+    private function anchored(string $pattern): bool
+    {
+        $delimiter = $pattern[0] ?? '';
+        $end = $delimiter === '' ? false : strrpos($pattern, $delimiter);
+        if ($end === false || $end < 1) {
+            return false;
+        }
+        $body = substr($pattern, 1, $end - 1);
+
+        return str_starts_with($body, '^') && (str_ends_with($body, '$') || str_ends_with($body, '\z'));
+    }
+
     /**
      * @param  array<string, mixed>  $route
      * @return array<string, mixed>|null
      */
     private function cleanRoute(array $route, ?string $package): ?array
     {
-        if (! is_string($route['path'] ?? null) || @preg_match($route['path'], '') === false) {
+        if (! is_string($route['path'] ?? null) || @preg_match($route['path'], '') === false || ! $this->anchored($route['path'])) {
             return null;
         }
         $out = ['path' => $route['path'], 'ios' => null, 'android' => null];
