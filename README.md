@@ -11,6 +11,7 @@ The URL and content safety rules for the HOP family ([hel.ink](https://hel.ink))
 | `Hop\Safety\LinkSafety` | Judges a destination URL (and the text around it) against keyword patterns, risky hosts, brand spoofing, the shared domain blacklist, local threat feeds and optional online lookups. |
 | `Hop\Safety\LinkVerdict` | Follows a link through its redirects and turns the score into one answer, a `Verdict`: `allow`, `interstitial` or `block`, with the reasons, the final address and the hop count. |
 | `Hop\Safety\EncryptedNoteLink` | Recognises an encrypted NoteHop address, whose key sits in the `#fragment`, so an app that stores destinations can refuse it. `LinkSafety` uses it. |
+| `Hop\Safety\DeepLinks` | Turns an https destination on a known app's host (YouTube, Spotify, WhatsApp, ...) into the `intent://` and app-scheme addresses that open the app, with the original address as fallback. Returns a `DeepLink`. |
 | `Hop\Safety\UrlGuard` | Decides whether the server may fetch a URL: http or https only, and every address the host resolves to must be public. It can also pin the connection to the addresses it checked. |
 | `Hop\Safety\SafeContent` | Cleans user content before it is shown: sanitizes HTML, turns an unsafe link into `#`, and strips what could break out of a `<style>` element. |
 | `Hop\Safety\Models\DomainBlacklist` | The Eloquent model of the `domain_blacklist` table. |
@@ -143,6 +144,55 @@ The address is read the way a browser reads it, not the way `parse_url()` does: 
 The hosts are `safety.note_hosts` (`HOP_NOTE_HOSTS`, default `note.hel.ink,n.hel.ink`). An app can add more, for example from its app registry, with `EncryptedNoteLink::resolveHostsUsing(fn () => [...])`.
 
 The same class helps apps clean what they already hold: `withoutFragment($url)`, `withoutSecrets($url)` (only `k` and `a` leave the fragment), and `scrub($text)` and `scrubJson($json)` (every NoteHop address in a text or a JSON column; other hosts' fragments stay).
+
+### Open in the app (deep links)
+
+`DeepLinks::resolve($url)` turns an `https://` destination on the host of a known app (YouTube, Spotify, WhatsApp, Telegram, Instagram, X, TikTok, Zoom, App Store, Google Play) into a `DeepLink`: `app`, `name`, `ios` and `android` (each `null` when that platform has no address) and `fallback`, the address you passed in. Everything else answers `null`. Which platform a visitor is on is decided by the caller.
+
+```php
+use Hop\Safety\DeepLinks;
+
+// A redirect (LinkHop): $url is the destination, already checked; $os is 'ios' or 'android' from your own user-agent detection.
+$deep = app(DeepLinks::class)->resolve($url);
+if ($deep && ($address = $deep->forPlatform($os))) {
+    return response()->view('open-in-app', ['app' => $deep->name, 'open' => $address, 'fallback' => $deep->fallback]);
+}
+
+return redirect()->away($url);
+```
+
+```php
+// A block renderer (BioHop): the link always works without script, the app addresses ride along as data attributes.
+$deep = app(DeepLinks::class)->resolve($block['url']);
+```
+
+```blade
+<a href="{{ $deep?->fallback ?? $block['url'] }}" @if ($deep) data-app="{{ $deep->name }}" data-ios="{{ $deep->ios }}" data-android="{{ $deep->android }}" @endif>{{ $block['title'] }}</a>
+```
+
+Only an `https://` address is read, and only its host picks the app: never a typed scheme, no user info, port, IP address, trailing dot or look-alike host, no space, control character or backslash, and nothing longer than `safety.deep_links.max_url_length` (2048). The path must match the route as a whole, everything carried over is percent-encoded piece by piece (so `;`, `#`, quotes and line breaks cannot leave an `intent://` address) and the result is checked once more against a strict shape.
+
+The known apps are data in `resources/deep-link-apps.php`. An app can add, replace or remove one with `safety.deep_links.apps` (same shape, merged by key, `false` removes it); an entry that is not valid is ignored.
+
+```php
+// config/safety.php
+'deep_links' => [
+    'apps' => [
+        'example-chat' => [
+            'name' => 'Example Chat',
+            'hosts' => ['chat.example.com'],
+            'android_package' => 'com.example.chat',
+            'routes' => [[
+                'path' => '#^/room/(?<room>[a-z0-9]{3,20})$#',
+                'args' => ['room' => 'room'],
+                'ios' => 'examplechat://join{args}',
+                'android' => ['intent' => 'join{args}', 'scheme' => 'examplechat'],
+            ]],
+        ],
+        'tiktok' => false, // remove a shipped app
+    ],
+],
+```
 
 ### Fetching a user-supplied URL
 

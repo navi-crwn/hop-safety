@@ -11,6 +11,7 @@ Die Sicherheitsregeln für URLs und Inhalte der HOP-Familie ([hel.ink](https://h
 | `Hop\Safety\LinkSafety` | Beurteilt eine Ziel-URL (und den Text um sie herum) anhand von Schlüsselwortmustern, riskanten Hosts, Markenimitation, der gemeinsamen Domain-Blacklist, lokalen Bedrohungsfeeds und optionalen Online-Abfragen. |
 | `Hop\Safety\LinkVerdict` | Folgt einem Link durch seine Weiterleitungen und macht aus der Punktzahl eine einzige Antwort, ein `Verdict`: `allow`, `interstitial` oder `block`, mit den Gründen, der Endadresse und der Zahl der Hops. |
 | `Hop\Safety\EncryptedNoteLink` | Erkennt eine verschlüsselte NoteHop-Adresse, deren Schlüssel im `#fragment` steht, damit eine App, die Ziele speichert, sie ablehnen kann. `LinkSafety` nutzt sie. |
+| `Hop\Safety\DeepLinks` | Macht aus einem https-Ziel auf dem Host einer bekannten App (YouTube, Spotify, WhatsApp, ...) die `intent://`- und App-Schema-Adressen, die die App öffnen, mit der Originaladresse als Fallback. Liefert einen `DeepLink`. |
 | `Hop\Safety\UrlGuard` | Entscheidet, ob der Server eine URL abrufen darf: nur http oder https, und jede Adresse, zu der der Host auflöst, muss öffentlich sein. Er kann die Verbindung auch an die geprüften Adressen binden. |
 | `Hop\Safety\SafeContent` | Bereinigt Benutzerinhalte vor der Anzeige: säubert HTML, macht aus einem unsicheren Link `#` und entfernt, was aus einem `<style>`-Element ausbrechen könnte. |
 | `Hop\Safety\Models\DomainBlacklist` | Das Eloquent-Modell der Tabelle `domain_blacklist`. |
@@ -143,6 +144,55 @@ Die Adresse wird gelesen, wie ein Browser sie liest, nicht wie `parse_url()` es 
 Die Hosts sind `safety.note_hosts` (`HOP_NOTE_HOSTS`, Standard `note.hel.ink,n.hel.ink`). Eine App kann weitere hinzufügen, zum Beispiel aus ihrer App-Registry, mit `EncryptedNoteLink::resolveHostsUsing(fn () => [...])`.
 
 Dieselbe Klasse hilft Apps, zu bereinigen, was sie schon gespeichert haben: `withoutFragment($url)`, `withoutSecrets($url)` (nur `k` und `a` werden aus dem Fragment entfernt) sowie `scrub($text)` und `scrubJson($json)` (jede NoteHop-Adresse in einem Text oder einer JSON-Spalte; Fragmente anderer Hosts bleiben).
+
+### In der App öffnen (Deep Links)
+
+`DeepLinks::resolve($url)` macht aus einem `https://`-Ziel auf dem Host einer bekannten App (YouTube, Spotify, WhatsApp, Telegram, Instagram, X, TikTok, Zoom, App Store, Google Play) einen `DeepLink`: `app`, `name`, `ios` und `android` (jeweils `null`, wenn es für die Plattform keine Adresse gibt) sowie `fallback`, die übergebene Adresse. Alles andere ergibt `null`. Auf welcher Plattform ein Besucher ist, entscheidet der Aufrufer.
+
+```php
+use Hop\Safety\DeepLinks;
+
+// A redirect (LinkHop): $url is the destination, already checked; $os is 'ios' or 'android' from your own user-agent detection.
+$deep = app(DeepLinks::class)->resolve($url);
+if ($deep && ($address = $deep->forPlatform($os))) {
+    return response()->view('open-in-app', ['app' => $deep->name, 'open' => $address, 'fallback' => $deep->fallback]);
+}
+
+return redirect()->away($url);
+```
+
+```php
+// A block renderer (BioHop): the link always works without script, the app addresses ride along as data attributes.
+$deep = app(DeepLinks::class)->resolve($block['url']);
+```
+
+```blade
+<a href="{{ $deep?->fallback ?? $block['url'] }}" @if ($deep) data-app="{{ $deep->name }}" data-ios="{{ $deep->ios }}" data-android="{{ $deep->android }}" @endif>{{ $block['title'] }}</a>
+```
+
+Gelesen wird nur eine `https://`-Adresse, und nur ihr Host wählt die App: nie ein getipptes Schema, keine Benutzerinfo, kein Port, keine IP-Adresse, kein Punkt am Ende, kein Host, der nur ähnlich aussieht, kein Leerzeichen, Steuerzeichen oder Backslash und nichts, was länger ist als `safety.deep_links.max_url_length` (2048). Der Pfad muss als Ganzes zur Route passen, alles Übernommene wird Stück für Stück prozentcodiert (`;`, `#`, Anführungszeichen und Zeilenumbrüche können eine `intent://`-Adresse also nicht verlassen), und das Ergebnis wird noch einmal gegen eine strenge Form geprüft.
+
+Die bekannten Apps sind Daten in `resources/deep-link-apps.php`. Eine App kann über `safety.deep_links.apps` Einträge hinzufügen, ersetzen oder entfernen (gleiche Form, nach Schlüssel zusammengeführt, `false` entfernt); ein ungültiger Eintrag wird ignoriert.
+
+```php
+// config/safety.php
+'deep_links' => [
+    'apps' => [
+        'example-chat' => [
+            'name' => 'Example Chat',
+            'hosts' => ['chat.example.com'],
+            'android_package' => 'com.example.chat',
+            'routes' => [[
+                'path' => '#^/room/(?<room>[a-z0-9]{3,20})$#',
+                'args' => ['room' => 'room'],
+                'ios' => 'examplechat://join{args}',
+                'android' => ['intent' => 'join{args}', 'scheme' => 'examplechat'],
+            ]],
+        ],
+        'tiktok' => false, // remove a shipped app
+    ],
+],
+```
 
 ### Eine vom Benutzer gelieferte URL abrufen
 

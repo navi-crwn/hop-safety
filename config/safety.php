@@ -32,6 +32,13 @@ return [
     // install's domains with HOP_NOTE_HOSTS=note.example.com,n.example.com.
     'note_hosts' => array_values(array_filter(array_map('trim', explode(',', (string) env('HOP_NOTE_HOSTS', 'note.hel.ink,n.hel.ink'))))),
 
+    // "Open in the app" (see DeepLinks). The apps themselves are in resources/deep-link-apps.php; 'apps' here adds,
+    // replaces (same key) or removes (false) one, in the same shape. 'max_url_length' is the longest destination read.
+    'deep_links' => [
+        'apps' => [],
+        'max_url_length' => 2048,
+    ],
+
     // Score contributed by each signal.
     'weights' => [
         'csam' => 100,

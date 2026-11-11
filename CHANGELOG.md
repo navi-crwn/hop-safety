@@ -4,6 +4,13 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- `Hop\Safety\DeepLinks` and the `DeepLink` value object: "open in the app" for an https destination on the host of a known app (YouTube, Spotify, WhatsApp, Telegram, Instagram, X, TikTok, Zoom, App Store, Google Play). `resolve($url)` returns the app, the iOS address, the Android `intent://` (or `market://`) address and the original address as `fallback`, or `null`. It is the shared, tested home of what LinkHop's `App\Support\DeepLinks::auto()` did, for LinkHop's redirect and BioHop's app block. Which platform a visitor is on stays with the caller.
+- Safety rules, all failing closed: only `https://` is read and only its host picks the app (no typed scheme, user info, port, IP literal, trailing dot or look-alike host, no whitespace, control character or backslash, no address over `safety.deep_links.max_url_length`, 2048 by default); the path must match the route as a whole; every piece carried over is percent-encoded, so `;`, `#`, quotes and line breaks cannot leave an `intent://` address; the finished address is checked against a strict shape; the Android package always comes from the table.
+- The known apps are data in `resources/deep-link-apps.php`. An app adds, replaces or removes one with `config('safety.deep_links.apps')` (same shape, merged by key, `false` removes); entries that are not valid are ignored. `DeepLinks` is bound as a singleton by the service provider.
+- README (and its 8 translations): a section and a table row for `DeepLinks`. Tests: `tests/Unit/DeepLinksTest.php` (the ported LinkHop cases, the injection table, host and scheme refusals) and `tests/Feature/DeepLinksConfigTest.php` (configuration, invalid entries, a guard that the class does not depend on LinkHop code). The CI gate in `.github/workflows/package-static.yml` expects the new total.
+
 ## [0.1.1] - 2026-11-11
 
 ### Changed

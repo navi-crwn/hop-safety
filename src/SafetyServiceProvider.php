@@ -10,6 +10,7 @@ use Illuminate\Support\ServiceProvider;
  * LinkSafety scores a URL (patterns, risky TLDs, brand spoofing, the shared
  * domain_blacklist table, threat feeds, optional Safe Browsing); LinkVerdict
  * follows the link and turns the score into allow / interstitial / block;
+ * DeepLinks turns a destination on a known app's host into the app address (iOS, Android) with an https fallback;
  * UrlGuard blocks private and local targets; SafeContent sanitises HTML and text. The domain_blacklist
  * table is LinkHop's; the other apps only read it.
  */
@@ -21,6 +22,7 @@ class SafetyServiceProvider extends ServiceProvider
         // One instance per request/job so the domain blacklist is loaded once.
         $this->app->scoped(LinkSafety::class);
         $this->app->scoped(LinkVerdict::class);
+        $this->app->singleton(DeepLinks::class);
     }
 
     public function boot(): void
