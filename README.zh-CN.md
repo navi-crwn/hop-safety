@@ -11,6 +11,7 @@ HOP 系列（[hel.ink](https://hel.ink)）的 URL 与内容安全规则，打包
 | `Hop\Safety\LinkSafety` | 根据关键词模式、高风险主机、品牌仿冒、共享的域名黑名单、本地威胁源和可选的在线查询，判定一个目标 URL（以及它周围的文本）。 |
 | `Hop\Safety\LinkVerdict` | 沿着链接的重定向一路跟随，把分数变成一个答案，即 `Verdict`：`allow`、`interstitial` 或 `block`，并附带原因、最终地址和跳转次数。 |
 | `Hop\Safety\EncryptedNoteLink` | 识别加密的 NoteHop 地址（其密钥位于 `#fragment` 中），让保存目标地址的应用可以拒绝它。`LinkSafety` 会用到它。 |
+| `Hop\Safety\DeepLinks` | 把已知应用主机上的 https 目标地址转换为打开该应用的 `intent://` 和应用协议地址,并以原始地址作为回退。返回 `DeepLink`。 |
 | `Hop\Safety\UrlGuard` | 决定服务器能否抓取某个 URL：只允许 http 或 https，并且主机解析出的每个地址都必须是公网地址。它还可以把连接固定到已检查过的地址上。 |
 | `Hop\Safety\SafeContent` | 在显示前清理用户内容：净化 HTML，把不安全的链接改成 `#`，并去掉可能跳出 `<style>` 元素的内容。 |
 | `Hop\Safety\Models\DomainBlacklist` | `domain_blacklist` 表的 Eloquent 模型。 |
@@ -143,6 +144,55 @@ NoteHop 链接把笔记密钥放在片段中（`https://n.hel.ink/TOKEN#k=KEY`�
 主机列表是 `safety.note_hosts`（`HOP_NOTE_HOSTS`，默认 `note.hel.ink,n.hel.ink`）。应用可以通过 `EncryptedNoteLink::resolveHostsUsing(fn () => [...])` 添加更多主机，例如来自自己的应用注册表。
 
 同一个类还能帮助应用清理已经保存的数据：`withoutFragment($url)`、`withoutSecrets($url)`（只从片段中移除 `k` 和 `a`），以及 `scrub($text)` 和 `scrubJson($json)`（处理文本或 JSON 列中的所有 NoteHop 地址；其他主机的片段保持不变）。
+
+### 在应用中打开(深度链接)
+
+`DeepLinks::resolve($url)` 会把已知应用(YouTube、Spotify、WhatsApp、Telegram、Instagram、X、TikTok、Zoom、App Store、Google Play)主机上的 `https://` 目标地址转换为 `DeepLink`:`app`、`name`、`ios`、`android`(该平台没有地址时为 `null`)以及 `fallback`(即传入的原始地址)。其他地址一律返回 `null`。访客使用哪个平台由调用方判断。
+
+```php
+use Hop\Safety\DeepLinks;
+
+// A redirect (LinkHop): $url is the destination, already checked; $os is 'ios' or 'android' from your own user-agent detection.
+$deep = app(DeepLinks::class)->resolve($url);
+if ($deep && ($address = $deep->forPlatform($os))) {
+    return response()->view('open-in-app', ['app' => $deep->name, 'open' => $address, 'fallback' => $deep->fallback]);
+}
+
+return redirect()->away($url);
+```
+
+```php
+// A block renderer (BioHop): the link always works without script, the app addresses ride along as data attributes.
+$deep = app(DeepLinks::class)->resolve($block['url']);
+```
+
+```blade
+<a href="{{ $deep?->fallback ?? $block['url'] }}" @if ($deep) data-app="{{ $deep->name }}" data-ios="{{ $deep->ios }}" data-android="{{ $deep->android }}" @endif>{{ $block['title'] }}</a>
+```
+
+只读取 `https://` 地址,并且只由主机决定是哪个应用:不接受用户输入的协议,不接受用户信息、端口、IP 地址、末尾的点、仿冒主机,不接受空格、控制字符、反斜杠,也不接受长于 `safety.deep_links.max_url_length`(2048)的地址。路径必须整体匹配路由,带入的每一部分都会逐段进行百分号编码(因此 `;`、`#`、引号和换行无法逃出 `intent://` 地址),结果还会再按严格格式检查一次。
+
+已知应用是 `resources/deep-link-apps.php` 中的数据。应用可通过 `safety.deep_links.apps` 添加、替换或删除条目(结构相同,按键合并,`false` 表示删除);无效条目会被忽略。
+
+```php
+// config/safety.php
+'deep_links' => [
+    'apps' => [
+        'example-chat' => [
+            'name' => 'Example Chat',
+            'hosts' => ['chat.example.com'],
+            'android_package' => 'com.example.chat',
+            'routes' => [[
+                'path' => '#^/room/(?<room>[a-z0-9]{3,20})$#',
+                'args' => ['room' => 'room'],
+                'ios' => 'examplechat://join{args}',
+                'android' => ['intent' => 'join{args}', 'scheme' => 'examplechat'],
+            ]],
+        ],
+        'tiktok' => false, // remove a shipped app
+    ],
+],
+```
 
 ### 抓取用户提供的 URL
 

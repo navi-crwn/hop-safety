@@ -11,6 +11,7 @@ Aturan keamanan URL dan konten untuk keluarga HOP ([hel.ink](https://hel.ink)), 
 | `Hop\Safety\LinkSafety` | Menilai URL tujuan (dan teks di sekitarnya) berdasarkan pola kata kunci, host berisiko, pemalsuan merek, daftar hitam domain bersama, feed ancaman lokal, dan pengecekan online opsional. |
 | `Hop\Safety\LinkVerdict` | Mengikuti tautan melewati semua pengalihannya dan mengubah skor menjadi satu jawaban, sebuah `Verdict`: `allow`, `interstitial`, atau `block`, beserta alasannya, alamat akhir, dan jumlah hop. |
 | `Hop\Safety\EncryptedNoteLink` | Mengenali alamat NoteHop terenkripsi, yang kuncinya ada di `#fragment`, agar aplikasi yang menyimpan alamat tujuan bisa menolaknya. `LinkSafety` memakainya. |
+| `Hop\Safety\DeepLinks` | Mengubah tujuan https pada host aplikasi yang dikenal (YouTube, Spotify, WhatsApp, ...) menjadi alamat `intent://` dan skema aplikasi yang membuka aplikasinya, dengan alamat asli sebagai fallback. Mengembalikan `DeepLink`. |
 | `Hop\Safety\UrlGuard` | Menentukan apakah server boleh mengambil sebuah URL: hanya http atau https, dan setiap alamat hasil resolusi host harus publik. Kelas ini juga bisa mengunci koneksi ke alamat yang sudah dicek. |
 | `Hop\Safety\SafeContent` | Membersihkan konten pengguna sebelum ditampilkan: menyaring HTML, mengubah tautan yang tidak aman menjadi `#`, dan membuang apa pun yang bisa keluar dari elemen `<style>`. |
 | `Hop\Safety\Models\DomainBlacklist` | Model Eloquent untuk tabel `domain_blacklist`. |
@@ -143,6 +144,55 @@ Alamat dibaca seperti cara browser membacanya, bukan seperti `parse_url()`: tab 
 Host-nya adalah `safety.note_hosts` (`HOP_NOTE_HOSTS`, bawaan `note.hel.ink,n.hel.ink`). Aplikasi bisa menambahkan host lain, misalnya dari registri aplikasinya, dengan `EncryptedNoteLink::resolveHostsUsing(fn () => [...])`.
 
 Kelas yang sama membantu aplikasi membersihkan data yang sudah tersimpan: `withoutFragment($url)`, `withoutSecrets($url)` (hanya `k` dan `a` yang dikeluarkan dari fragment), serta `scrub($text)` dan `scrubJson($json)` (setiap alamat NoteHop di teks atau kolom JSON; fragment host lain tetap ada).
+
+### Buka di aplikasi (deep link)
+
+`DeepLinks::resolve($url)` mengubah tujuan `https://` pada host aplikasi yang dikenal (YouTube, Spotify, WhatsApp, Telegram, Instagram, X, TikTok, Zoom, App Store, Google Play) menjadi `DeepLink`: `app`, `name`, `ios` dan `android` (masing-masing `null` bila platform itu tidak punya alamat) serta `fallback`, yaitu alamat yang Anda berikan. Selain itu hasilnya `null`. Platform pengunjung ditentukan oleh pemanggil.
+
+```php
+use Hop\Safety\DeepLinks;
+
+// A redirect (LinkHop): $url is the destination, already checked; $os is 'ios' or 'android' from your own user-agent detection.
+$deep = app(DeepLinks::class)->resolve($url);
+if ($deep && ($address = $deep->forPlatform($os))) {
+    return response()->view('open-in-app', ['app' => $deep->name, 'open' => $address, 'fallback' => $deep->fallback]);
+}
+
+return redirect()->away($url);
+```
+
+```php
+// A block renderer (BioHop): the link always works without script, the app addresses ride along as data attributes.
+$deep = app(DeepLinks::class)->resolve($block['url']);
+```
+
+```blade
+<a href="{{ $deep?->fallback ?? $block['url'] }}" @if ($deep) data-app="{{ $deep->name }}" data-ios="{{ $deep->ios }}" data-android="{{ $deep->android }}" @endif>{{ $block['title'] }}</a>
+```
+
+Hanya alamat `https://` yang dibaca, dan hanya host-nya yang menentukan aplikasi: tidak pernah skema yang diketik pengguna, tidak ada user info, port, alamat IP, titik di akhir, atau host yang meniru, tidak ada spasi, karakter kontrol atau backslash, dan tidak ada alamat yang lebih panjang dari `safety.deep_links.max_url_length` (2048). Path harus cocok utuh dengan rute, semua yang dibawa dikodekan persen bagian demi bagian (sehingga `;`, `#`, tanda kutip dan baris baru tidak dapat keluar dari alamat `intent://`), dan hasilnya diperiksa sekali lagi terhadap bentuk yang ketat.
+
+Daftar aplikasi yang dikenal adalah data di `resources/deep-link-apps.php`. Aplikasi pengguna dapat menambah, mengganti atau menghapus satu entri lewat `safety.deep_links.apps` (bentuk sama, digabung menurut kunci, `false` menghapus); entri yang tidak valid diabaikan.
+
+```php
+// config/safety.php
+'deep_links' => [
+    'apps' => [
+        'example-chat' => [
+            'name' => 'Example Chat',
+            'hosts' => ['chat.example.com'],
+            'android_package' => 'com.example.chat',
+            'routes' => [[
+                'path' => '#^/room/(?<room>[a-z0-9]{3,20})$#',
+                'args' => ['room' => 'room'],
+                'ios' => 'examplechat://join{args}',
+                'android' => ['intent' => 'join{args}', 'scheme' => 'examplechat'],
+            ]],
+        ],
+        'tiktok' => false, // remove a shipped app
+    ],
+],
+```
 
 ### Mengambil URL dari pengguna
 

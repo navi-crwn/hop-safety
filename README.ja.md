@@ -11,6 +11,7 @@ HOP ファミリー（[hel.ink](https://hel.ink)）の URL とコンテンツの
 | `Hop\Safety\LinkSafety` | 遷移先 URL（とその周りのテキスト）を、キーワードパターン、危険なホスト、ブランドのなりすまし、共有のドメインブラックリスト、ローカルの脅威フィード、任意のオンライン照会で判定します。 |
 | `Hop\Safety\LinkVerdict` | リンクをリダイレクトの先までたどり、スコアを 1 つの答え、つまり `Verdict` に変えます。値は `allow`、`interstitial`、`block` のいずれかで、理由、最終アドレス、ホップ数が付きます。 |
 | `Hop\Safety\EncryptedNoteLink` | 鍵が `#fragment` にある暗号化された NoteHop アドレスを見分け、遷移先を保存するアプリがそれを拒否できるようにします。`LinkSafety` が使います。 |
+| `Hop\Safety\DeepLinks` | 既知のアプリ(YouTube、Spotify、WhatsApp など)のホストにある https の宛先を、アプリを開く `intent://` とアプリスキームのアドレスに変換し、元のアドレスをフォールバックにします。`DeepLink` を返します。 |
 | `Hop\Safety\UrlGuard` | サーバーがその URL を取得してよいかを決めます。http か https のみで、ホストが解決されるアドレスはすべて公開アドレスである必要があります。接続を確認済みのアドレスに固定することもできます。 |
 | `Hop\Safety\SafeContent` | 表示前にユーザーのコンテンツをきれいにします。HTML をサニタイズし、安全でないリンクを `#` に変え、`<style>` 要素の外に抜け出せるものを取り除きます。 |
 | `Hop\Safety\Models\DomainBlacklist` | `domain_blacklist` テーブルの Eloquent モデルです。 |
@@ -143,6 +144,55 @@ NoteHop のリンクはノートの鍵をフラグメントに持ちます（`ht
 ホストは `safety.note_hosts`（`HOP_NOTE_HOSTS`、デフォルトは `note.hel.ink,n.hel.ink`）です。アプリは `EncryptedNoteLink::resolveHostsUsing(fn () => [...])` で、たとえば自分のアプリレジストリからホストを追加できます。
 
 同じクラスは、アプリがすでに保存しているデータの掃除にも使えます。`withoutFragment($url)`、`withoutSecrets($url)`（フラグメントから外れるのは `k` と `a` だけ）、そして `scrub($text)` と `scrubJson($json)`（テキストや JSON 列にあるすべての NoteHop アドレスが対象。ほかのホストのフラグメントは残ります）です。
+
+### アプリで開く(ディープリンク)
+
+`DeepLinks::resolve($url)` は、既知のアプリ(YouTube、Spotify、WhatsApp、Telegram、Instagram、X、TikTok、Zoom、App Store、Google Play)のホストにある `https://` の宛先を `DeepLink` に変換します。`app`、`name`、`ios`、`android`(そのプラットフォーム用のアドレスがなければ `null`)、そして渡したアドレスそのものの `fallback` を持ちます。それ以外は `null` を返します。訪問者のプラットフォームの判定は呼び出し側が行います。
+
+```php
+use Hop\Safety\DeepLinks;
+
+// A redirect (LinkHop): $url is the destination, already checked; $os is 'ios' or 'android' from your own user-agent detection.
+$deep = app(DeepLinks::class)->resolve($url);
+if ($deep && ($address = $deep->forPlatform($os))) {
+    return response()->view('open-in-app', ['app' => $deep->name, 'open' => $address, 'fallback' => $deep->fallback]);
+}
+
+return redirect()->away($url);
+```
+
+```php
+// A block renderer (BioHop): the link always works without script, the app addresses ride along as data attributes.
+$deep = app(DeepLinks::class)->resolve($block['url']);
+```
+
+```blade
+<a href="{{ $deep?->fallback ?? $block['url'] }}" @if ($deep) data-app="{{ $deep->name }}" data-ios="{{ $deep->ios }}" data-android="{{ $deep->android }}" @endif>{{ $block['title'] }}</a>
+```
+
+読み取るのは `https://` のアドレスだけで、アプリを決めるのはホストだけです。入力されたスキーム、ユーザー情報、ポート、IP アドレス、末尾のドット、似せたホスト、空白・制御文字・バックスラッシュ、`safety.deep_links.max_url_length`(2048)を超える長さは受け付けません。パスはルート全体に一致する必要があり、引き継ぐ値はすべて部分ごとにパーセントエンコードされ(`;`、`#`、引用符、改行が `intent://` アドレスの外に出ることはありません)、結果はさらに厳密な形式で再確認されます。
+
+既知のアプリは `resources/deep-link-apps.php` のデータです。アプリ側は `safety.deep_links.apps`(同じ形式、キーで統合、`false` で削除)で追加・置換・削除できます。無効なエントリは無視されます。
+
+```php
+// config/safety.php
+'deep_links' => [
+    'apps' => [
+        'example-chat' => [
+            'name' => 'Example Chat',
+            'hosts' => ['chat.example.com'],
+            'android_package' => 'com.example.chat',
+            'routes' => [[
+                'path' => '#^/room/(?<room>[a-z0-9]{3,20})$#',
+                'args' => ['room' => 'room'],
+                'ios' => 'examplechat://join{args}',
+                'android' => ['intent' => 'join{args}', 'scheme' => 'examplechat'],
+            ]],
+        ],
+        'tiktok' => false, // remove a shipped app
+    ],
+],
+```
 
 ### ユーザーが入力した URL の取得
 

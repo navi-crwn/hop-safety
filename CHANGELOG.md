@@ -4,6 +4,15 @@ All notable changes to `hop/safety` are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-12
+
+### Added
+
+- `Hop\Safety\DeepLinks` and the `DeepLink` value object: "open in the app" for an https destination on the host of a known app (YouTube, Spotify, WhatsApp, Telegram, Instagram, X, TikTok, Zoom, App Store, Google Play). `resolve($url)` returns the app, the iOS address, the Android `intent://` (or `market://`) address and the original address as `fallback`, or `null`. One class serves a redirect and a block renderer. Which platform a visitor is on stays with the caller.
+- Safety rules, all failing closed: only `https://` is read and only its host picks the app (no typed scheme, user info, port, IP literal, trailing dot or look-alike host, no whitespace, control character or backslash, no address over `safety.deep_links.max_url_length`, 2048 by default); the path must match the route as a whole (every pattern of the table ends in `\z`); a query value that decodes to a control character (`%0A`, `%0D`, `%00`...) gives no deep link; every piece carried over is percent-encoded, so `;`, `#`, quotes and line breaks cannot leave an `intent://` address; the finished address is checked against a strict shape; the Android package always comes from the table.
+- The known apps are data in `resources/deep-link-apps.php`. An app adds, replaces or removes one with `config('safety.deep_links.apps')` (same shape, merged by key, `false` removes); entries that are not valid are ignored, and so is a route whose `path` pattern does not start with `^` and end with `$` or `\z`. `DeepLinks` is bound as a singleton by the service provider.
+- README (and its 8 translations): a section and a table row for `DeepLinks`. Tests: `tests/Unit/DeepLinksTest.php` (known apps, the injection table, host and scheme refusals) and `tests/Feature/DeepLinksConfigTest.php` (configuration, invalid entries, a guard that the class stays free of app code).
+
 ## [0.1.1] - 2026-11-11
 
 ### Changed
